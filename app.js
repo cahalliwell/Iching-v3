@@ -2945,6 +2945,11 @@ const stylesHome = StyleSheet.create({
   },
   headerRow: {
     alignItems: "flex-end",
+    paddingTop: Platform.select({
+      ios: theme.space(1.5),
+      android: theme.space(2),
+      default: theme.space(1.5),
+    }),
   },
   mainContent: {
     flexGrow: 1,
