@@ -2769,53 +2769,85 @@ const stylesReading = StyleSheet.create({
 
 // ✨ Hero hexagon
 function GlowingHexagon() {
-  const glowOpacity = useRef(new Animated.Value(0.92)).current;
-  const glowScale = useRef(new Animated.Value(0.98)).current;
+  const glowOpacity = useRef(new Animated.Value(0.7)).current;
+  const glowScale = useRef(new Animated.Value(0.92)).current;
 
   useEffect(() => {
-    const pulse = Animated.loop(
+    const auraAnimation = Animated.loop(
       Animated.sequence([
         Animated.parallel([
           Animated.timing(glowOpacity, {
-            toValue: 1,
-            duration: 2600,
+            toValue: 0.95,
+            duration: 3200,
             useNativeDriver: true,
           }),
           Animated.timing(glowScale, {
-            toValue: 1.03,
-            duration: 2600,
+            toValue: 1.05,
+            duration: 3200,
             useNativeDriver: true,
           }),
         ]),
         Animated.parallel([
           Animated.timing(glowOpacity, {
-            toValue: 0.88,
-            duration: 2600,
+            toValue: 0.6,
+            duration: 3200,
             useNativeDriver: true,
           }),
           Animated.timing(glowScale, {
-            toValue: 0.98,
-            duration: 2600,
+            toValue: 0.92,
+            duration: 3200,
             useNativeDriver: true,
           }),
         ]),
       ])
     );
-    pulse.start();
-    return () => pulse.stop();
+    auraAnimation.start();
+    return () => auraAnimation.stop();
   }, [glowOpacity, glowScale]);
 
   return (
     <View style={{ alignItems: "center", marginVertical: theme.space(3) }}>
       <Animated.View
         style={{
+          position: "absolute",
           opacity: glowOpacity,
           transform: [{ scale: glowScale }],
-          shadowColor: "#000000",
-          shadowOpacity: 0.25,
-          shadowRadius: 22,
-          shadowOffset: { width: 0, height: 16 },
-          elevation: 14,
+        }}
+      >
+        <Svg width={240} height={240} viewBox="0 0 200 200">
+          <Defs>
+            <RadialGradient id="aura" cx="50%" cy="50%" r="50%">
+              <Stop offset="0%" stopColor="#fff9e8" stopOpacity="1" />
+              <Stop offset="45%" stopColor={palette.goldLight} stopOpacity="0.85" />
+              <Stop offset="100%" stopColor={palette.parchmentGold} stopOpacity="0" />
+            </RadialGradient>
+            <RadialGradient id="innerGlow" cx="50%" cy="50%" r="60%">
+              <Stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+              <Stop offset="70%" stopColor="#ffcf70" stopOpacity="0" />
+            </RadialGradient>
+            <SvgLinearGradient id="edgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#fff4c9" stopOpacity="0.8" />
+              <Stop offset="55%" stopColor="rgba(255, 244, 201, 0)" stopOpacity="0" />
+              <Stop offset="100%" stopColor="#d68a1f" stopOpacity="0.6" />
+            </SvgLinearGradient>
+          </Defs>
+          <Circle cx="100" cy="100" r="92" fill="url(#aura)" />
+        </Svg>
+      </Animated.View>
+
+      <View
+        style={{
+          width: 190,
+          height: 190,
+          borderRadius: 95,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: palette.gold,
+          shadowOpacity: 0.35,
+          shadowRadius: 26,
+          shadowOffset: { width: 0, height: 18 },
+          elevation: 16,
+          backgroundColor: "rgba(255, 241, 205, 0.28)",
         }}
       >
         <Svg width={170} height={170} viewBox="0 0 100 100">
@@ -2845,7 +2877,7 @@ function GlowingHexagon() {
             fill="none"
           />
         </Svg>
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -3029,7 +3061,11 @@ const stylesHome = StyleSheet.create({
   },
   headerRow: {
     alignItems: "flex-end",
-    paddingTop: screenTopPadding,
+    paddingTop: Platform.select({
+      ios: theme.space(1.5),
+      android: theme.space(2),
+      default: theme.space(1.5),
+    }),
   },
   mainContent: {
     flexGrow: 1,
