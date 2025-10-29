@@ -91,6 +91,12 @@ const fonts = {
   bodyBold: "Lora_600SemiBold",
 };
 
+const screenTopPadding = Platform.select({
+  ios: theme.space(1.5),
+  android: theme.space(2),
+  default: theme.space(1.5),
+});
+
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 // 🔗 Supabase client
@@ -1322,6 +1328,7 @@ const stylesInsights = StyleSheet.create({
   },
   container: {
     padding: theme.space(3),
+    paddingTop: theme.space(3) + screenTopPadding,
   },
   screenTitle: {
     fontFamily: fonts.title,
@@ -2619,6 +2626,7 @@ const stylesReading = StyleSheet.create({
   container: {
     padding: theme.space(2),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2) + screenTopPadding,
   },
   closeButton: {
     width: 42,
@@ -2720,49 +2728,106 @@ const stylesReading = StyleSheet.create({
 
 // ✨ Hero hexagon
 function GlowingHexagon() {
-  const glow = useRef(new Animated.Value(0.55)).current;
+  const glowOpacity = useRef(new Animated.Value(0.7)).current;
+  const glowScale = useRef(new Animated.Value(0.92)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const auraAnimation = Animated.loop(
       Animated.sequence([
-        Animated.timing(glow, {
-          toValue: 0.85,
-          duration: 3200,
-          useNativeDriver: false,
-        }),
-        Animated.timing(glow, {
-          toValue: 0.55,
-          duration: 3200,
-          useNativeDriver: false,
-        }),
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 0.95,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowScale, {
+            toValue: 1.05,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 0.6,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowScale, {
+            toValue: 0.92,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+        ]),
       ])
-    ).start();
-  }, [glow]);
+    );
+    auraAnimation.start();
+    return () => auraAnimation.stop();
+  }, [glowOpacity, glowScale]);
 
   return (
     <View style={{ alignItems: "center", marginVertical: theme.space(3) }}>
-      <Animated.View style={{ position: "absolute", opacity: glow }}>
-        <Svg width={220} height={220} viewBox="0 0 200 200">
+      <Animated.View
+        style={{
+          position: "absolute",
+          opacity: glowOpacity,
+          transform: [{ scale: glowScale }],
+        }}
+      >
+        <Svg width={240} height={240} viewBox="0 0 200 200">
           <Defs>
             <RadialGradient id="aura" cx="50%" cy="50%" r="50%">
-              <Stop offset="0%" stopColor={palette.goldLight} stopOpacity="0.9" />
-              <Stop offset="60%" stopColor={palette.gold} stopOpacity="0.35" />
+              <Stop offset="0%" stopColor="#fff9e8" stopOpacity="1" />
+              <Stop offset="45%" stopColor={palette.goldLight} stopOpacity="0.85" />
               <Stop offset="100%" stopColor={palette.parchmentGold} stopOpacity="0" />
             </RadialGradient>
           </Defs>
-          <Circle cx="100" cy="100" r="90" fill="url(#aura)" />
+          <Circle cx="100" cy="100" r="92" fill="url(#aura)" />
         </Svg>
       </Animated.View>
 
-      <Svg width={170} height={170} viewBox="0 0 100 100">
-        <Defs>
-          <RadialGradient id="core" cx="50%" cy="50%" r="50%">
-            <Stop offset="0%" stopColor={palette.goldLight} stopOpacity="1" />
-            <Stop offset="100%" stopColor={palette.gold} stopOpacity="1" />
-          </RadialGradient>
-        </Defs>
-        <Polygon points={HEX_POINTS} fill="url(#core)" />
-      </Svg>
+      <View
+        style={{
+          width: 190,
+          height: 190,
+          borderRadius: 95,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: palette.gold,
+          shadowOpacity: 0.35,
+          shadowRadius: 26,
+          shadowOffset: { width: 0, height: 18 },
+          elevation: 16,
+          backgroundColor: "rgba(255, 241, 205, 0.28)",
+        }}
+      >
+        <Svg width={170} height={170} viewBox="0 0 100 100">
+          <Defs>
+            <RadialGradient id="core" cx="50%" cy="50%" r="55%">
+              <Stop offset="0%" stopColor="#fffbe8" stopOpacity="1" />
+              <Stop offset="38%" stopColor="#ffe7a6" stopOpacity="0.98" />
+              <Stop offset="100%" stopColor="#f3b43c" stopOpacity="1" />
+            </RadialGradient>
+            <RadialGradient id="innerGlow" cx="50%" cy="50%" r="60%">
+              <Stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+              <Stop offset="70%" stopColor="#ffcf70" stopOpacity="0" />
+            </RadialGradient>
+            <SvgLinearGradient id="edgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#fff4c9" stopOpacity="0.8" />
+              <Stop offset="55%" stopColor="rgba(255, 244, 201, 0)" stopOpacity="0" />
+              <Stop offset="100%" stopColor="#d68a1f" stopOpacity="0.6" />
+            </SvgLinearGradient>
+          </Defs>
+          <Polygon points={HEX_POINTS} fill="url(#core)" />
+          <Polygon points={HEX_POINTS} fill="url(#edgeSheen)" opacity="0.5" />
+          <Polygon points={HEX_POINTS} fill="url(#innerGlow)" opacity="0.7" />
+          <Polygon
+            points={HEX_POINTS}
+            stroke="rgba(255, 255, 255, 0.65)"
+            strokeWidth={0.9}
+            fill="none"
+          />
+        </Svg>
+      </View>
     </View>
   );
 }
@@ -2942,9 +3007,11 @@ const stylesHome = StyleSheet.create({
   container: {
     flexGrow: 1,
     padding: theme.space(2.5),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   headerRow: {
     alignItems: "flex-end",
+    paddingTop: screenTopPadding,
   },
   mainContent: {
     flexGrow: 1,
@@ -3101,7 +3168,13 @@ function CastScreen({ route, navigation }) {
   return (
     <GradientBackground>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: theme.space(2.5),
+            paddingBottom: theme.space(3),
+            paddingTop: theme.space(2.5) + screenTopPadding,
+          }}
+        >
           <Text style={stylesCast.sectionTitle}>Casting</Text>
           {question ? (
             <>
@@ -3207,7 +3280,13 @@ function ManualCastingScreen({ route, navigation }) {
     return (
       <GradientBackground>
         <SafeAreaView style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+          <ScrollView
+            contentContainerStyle={{
+              paddingHorizontal: theme.space(2.5),
+              paddingBottom: theme.space(3),
+              paddingTop: theme.space(2.5) + screenTopPadding,
+            }}
+          >
             <UpgradeCallout
               title="Manual casting requires Premium"
               description="Experience the full ritual of the I Ching with manual casting, AI-guided summaries, and advanced analytics when you upgrade."
@@ -3378,6 +3457,7 @@ const stylesManual = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -3506,7 +3586,13 @@ function ResultsScreen({ navigation, route }) {
   return (
     <GradientBackground>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: theme.space(2.5),
+            paddingBottom: theme.space(3),
+            paddingTop: theme.space(2.5) + screenTopPadding,
+          }}
+        >
           <Text style={stylesResults.sectionTitle}>Results</Text>
           {question ? (
             <>
@@ -3731,6 +3817,7 @@ const stylesLibrary = StyleSheet.create({
     flex: 1,
     padding: theme.space(2.5),
     paddingBottom: theme.space(3),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   content: {
     flex: 1,
@@ -3936,6 +4023,7 @@ const stylesJournal = StyleSheet.create({
   container: {
     flex: 1,
     padding: theme.space(2.5),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   title: {
     fontFamily: fonts.title,
@@ -4401,6 +4489,7 @@ const stylesDetail = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -4713,7 +4802,13 @@ function GuideScreen({ navigation }) {
   return (
     <GradientBackground>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: theme.space(2.5),
+            paddingBottom: theme.space(3),
+            paddingTop: theme.space(2.5) + screenTopPadding,
+          }}
+        >
           <Pressable
             onPress={() => navigation.goBack()}
             style={stylesGuide.backButton}
@@ -4965,6 +5060,7 @@ const stylesPremium = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -5254,6 +5350,7 @@ const stylesSettings = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -5367,8 +5464,21 @@ function MainTabs() {
         tabBarActiveTintColor: palette.gold,
         tabBarInactiveTintColor: palette.inkMuted,
         tabBarStyle: {
-          backgroundColor: palette.white,
-          borderTopColor: palette.border,
+          backgroundColor: palette.card,
+          borderTopColor: "rgba(176, 139, 49, 0.35)",
+          borderTopWidth: 1,
+          shadowColor: palette.goldDeep,
+          shadowOpacity: 0.16,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: -4 },
+          elevation: 10,
+        },
+        tabBarLabelStyle: {
+          fontFamily: fonts.bodyBold,
+          fontSize: 12,
+        },
+        tabBarItemStyle: {
+          paddingVertical: 6,
         },
         tabBarIcon: ({ color, size }) => {
           const icons = {
