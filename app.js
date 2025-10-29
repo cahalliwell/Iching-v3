@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -49,7 +48,6 @@ import {
   Lora_600SemiBold,
 } from "@expo-google-fonts/lora";
 import Svg, {
-  Circle,
   ClipPath,
   Defs,
   G,
@@ -90,6 +88,12 @@ const fonts = {
   body: "Lora_400Regular",
   bodyBold: "Lora_600SemiBold",
 };
+
+const screenTopPadding = Platform.select({
+  ios: theme.space(1.5),
+  android: theme.space(2),
+  default: theme.space(1.5),
+});
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -707,11 +711,26 @@ function ShimmerPlaceholder({ height, style }) {
   );
 }
 
-function SummaryCard({ title, subtitle, value, loading, accent, delay = 0 }) {
+function SummaryCard({
+  title,
+  subtitle,
+  value,
+  loading,
+  accent,
+  delay = 0,
+  column = 0,
+  isSolo = false,
+}) {
   const displayValue = useAnimatedCounter(value, loading);
   return (
     <MotionView
-      style={[stylesInsights.summaryCard, { borderColor: accent || palette.gold }]}
+      style={[
+        stylesInsights.summaryCard,
+        !isSolo && column === 0 && stylesInsights.summaryCardLeft,
+        !isSolo && column === 1 && stylesInsights.summaryCardRight,
+        isSolo && stylesInsights.summaryCardSolo,
+        { borderColor: accent || palette.gold },
+      ]}
       {...motionProps(delay)}
     >
       <Text style={stylesInsights.summaryLabel}>{title}</Text>
@@ -1001,7 +1020,6 @@ function TopCastsChart({ data, loading }) {
 }
 
 function InsightsOverviewScreen() {
-  const windowWidth = Dimensions.get("window").width;
   const { isPremium } = useAuth();
   const premiumMember = Boolean(isPremium);
   const navigation = useNavigation();
@@ -1161,6 +1179,11 @@ function InsightsOverviewScreen() {
     },
   ];
 
+  const summaryRows = [];
+  for (let i = 0; i < summaryCards.length; i += 2) {
+    summaryRows.push(summaryCards.slice(i, i + 2));
+  }
+
   useEffect(() => {
     const activeError =
       summaryError ||
@@ -1237,22 +1260,32 @@ function InsightsOverviewScreen() {
         </Text>
         {errorMessage ? <Text style={stylesInsights.errorText}>{errorMessage}</Text> : null}
 
-        <View
-          style={[
-            stylesInsights.summaryGrid,
-            { flexDirection: windowWidth > 768 ? "row" : "row", flexWrap: "wrap" },
-          ]}
-        >
-          {summaryCards.map((card, index) => (
-            <SummaryCard
-              key={card.title}
-              title={card.title}
-              subtitle={card.subtitle}
-              value={card.value}
-              loading={card.loading}
-              accent={index === 1 ? palette.goldLight : palette.gold}
-              delay={index * 80}
-            />
+        <View style={stylesInsights.summaryGrid}>
+          {summaryRows.map((rowCards, rowIndex) => (
+            <View
+              key={`summary-row-${rowIndex}`}
+              style={[
+                stylesInsights.summaryRow,
+                rowIndex === summaryRows.length - 1 && { marginBottom: 0 },
+              ]}
+            >
+              {rowCards.map((card, columnIndex) => {
+                const cardIndex = rowIndex * 2 + columnIndex;
+                return (
+                  <SummaryCard
+                    key={card.title}
+                    title={card.title}
+                    subtitle={card.subtitle}
+                    value={card.value}
+                    loading={card.loading}
+                    accent={cardIndex === 1 ? palette.goldLight : palette.gold}
+                    delay={cardIndex * 80}
+                    column={columnIndex}
+                    isSolo={rowCards.length === 1}
+                  />
+                );
+              })}
+            </View>
           ))}
         </View>
 
@@ -1322,6 +1355,7 @@ const stylesInsights = StyleSheet.create({
   },
   container: {
     padding: theme.space(3),
+    paddingTop: theme.space(3) + screenTopPadding,
   },
   screenTitle: {
     fontFamily: fonts.title,
@@ -1342,11 +1376,14 @@ const stylesInsights = StyleSheet.create({
   summaryGrid: {
     marginBottom: theme.space(3),
   },
-  summaryCard: {
-    width: "48%",
-    minWidth: 160,
-    marginRight: theme.space(1),
+  summaryRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
     marginBottom: theme.space(2),
+  },
+  summaryCard: {
+    flex: 1,
+    minWidth: 150,
     padding: theme.space(2),
     borderRadius: theme.radius,
     borderWidth: 1,
@@ -1355,6 +1392,17 @@ const stylesInsights = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  summaryCardLeft: {
+    marginRight: theme.space(1),
+  },
+  summaryCardRight: {
+    marginLeft: theme.space(1),
+  },
+  summaryCardSolo: {
+    marginLeft: 0,
+    marginRight: 0,
   },
   summaryLabel: {
     fontFamily: fonts.bodyBold,
@@ -2619,6 +2667,7 @@ const stylesReading = StyleSheet.create({
   container: {
     padding: theme.space(2),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2) + screenTopPadding,
   },
   closeButton: {
     width: 42,
@@ -2720,49 +2769,83 @@ const stylesReading = StyleSheet.create({
 
 // ✨ Hero hexagon
 function GlowingHexagon() {
-  const glow = useRef(new Animated.Value(0.55)).current;
+  const glowOpacity = useRef(new Animated.Value(0.92)).current;
+  const glowScale = useRef(new Animated.Value(0.98)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(glow, {
-          toValue: 0.85,
-          duration: 3200,
-          useNativeDriver: false,
-        }),
-        Animated.timing(glow, {
-          toValue: 0.55,
-          duration: 3200,
-          useNativeDriver: false,
-        }),
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 1,
+            duration: 2600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowScale, {
+            toValue: 1.03,
+            duration: 2600,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 0.88,
+            duration: 2600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowScale, {
+            toValue: 0.98,
+            duration: 2600,
+            useNativeDriver: true,
+          }),
+        ]),
       ])
-    ).start();
-  }, [glow]);
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [glowOpacity, glowScale]);
 
   return (
     <View style={{ alignItems: "center", marginVertical: theme.space(3) }}>
-      <Animated.View style={{ position: "absolute", opacity: glow }}>
-        <Svg width={220} height={220} viewBox="0 0 200 200">
+      <Animated.View
+        style={{
+          opacity: glowOpacity,
+          transform: [{ scale: glowScale }],
+          shadowColor: "#000000",
+          shadowOpacity: 0.25,
+          shadowRadius: 22,
+          shadowOffset: { width: 0, height: 16 },
+          elevation: 14,
+        }}
+      >
+        <Svg width={170} height={170} viewBox="0 0 100 100">
           <Defs>
-            <RadialGradient id="aura" cx="50%" cy="50%" r="50%">
-              <Stop offset="0%" stopColor={palette.goldLight} stopOpacity="0.9" />
-              <Stop offset="60%" stopColor={palette.gold} stopOpacity="0.35" />
-              <Stop offset="100%" stopColor={palette.parchmentGold} stopOpacity="0" />
+            <RadialGradient id="core" cx="50%" cy="50%" r="55%">
+              <Stop offset="0%" stopColor="#fffbe8" stopOpacity="1" />
+              <Stop offset="38%" stopColor="#ffe7a6" stopOpacity="0.98" />
+              <Stop offset="100%" stopColor="#f3b43c" stopOpacity="1" />
             </RadialGradient>
+            <RadialGradient id="innerGlow" cx="50%" cy="50%" r="60%">
+              <Stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+              <Stop offset="70%" stopColor="#ffcf70" stopOpacity="0" />
+            </RadialGradient>
+            <SvgLinearGradient id="edgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#fff4c9" stopOpacity="0.8" />
+              <Stop offset="55%" stopColor="rgba(255, 244, 201, 0)" stopOpacity="0" />
+              <Stop offset="100%" stopColor="#d68a1f" stopOpacity="0.6" />
+            </SvgLinearGradient>
           </Defs>
-          <Circle cx="100" cy="100" r="90" fill="url(#aura)" />
+          <Polygon points={HEX_POINTS} fill="url(#core)" />
+          <Polygon points={HEX_POINTS} fill="url(#edgeSheen)" opacity="0.5" />
+          <Polygon points={HEX_POINTS} fill="url(#innerGlow)" opacity="0.7" />
+          <Polygon
+            points={HEX_POINTS}
+            stroke="rgba(255, 255, 255, 0.65)"
+            strokeWidth={0.9}
+            fill="none"
+          />
         </Svg>
       </Animated.View>
-
-      <Svg width={170} height={170} viewBox="0 0 100 100">
-        <Defs>
-          <RadialGradient id="core" cx="50%" cy="50%" r="50%">
-            <Stop offset="0%" stopColor={palette.goldLight} stopOpacity="1" />
-            <Stop offset="100%" stopColor={palette.gold} stopOpacity="1" />
-          </RadialGradient>
-        </Defs>
-        <Polygon points={HEX_POINTS} fill="url(#core)" />
-      </Svg>
     </View>
   );
 }
@@ -2942,9 +3025,11 @@ const stylesHome = StyleSheet.create({
   container: {
     flexGrow: 1,
     padding: theme.space(2.5),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   headerRow: {
     alignItems: "flex-end",
+    paddingTop: screenTopPadding,
   },
   mainContent: {
     flexGrow: 1,
@@ -3101,7 +3186,13 @@ function CastScreen({ route, navigation }) {
   return (
     <GradientBackground>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: theme.space(2.5),
+            paddingBottom: theme.space(3),
+            paddingTop: theme.space(2.5) + screenTopPadding,
+          }}
+        >
           <Text style={stylesCast.sectionTitle}>Casting</Text>
           {question ? (
             <>
@@ -3207,7 +3298,13 @@ function ManualCastingScreen({ route, navigation }) {
     return (
       <GradientBackground>
         <SafeAreaView style={{ flex: 1 }}>
-          <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+          <ScrollView
+            contentContainerStyle={{
+              paddingHorizontal: theme.space(2.5),
+              paddingBottom: theme.space(3),
+              paddingTop: theme.space(2.5) + screenTopPadding,
+            }}
+          >
             <UpgradeCallout
               title="Manual casting requires Premium"
               description="Experience the full ritual of the I Ching with manual casting, AI-guided summaries, and advanced analytics when you upgrade."
@@ -3378,6 +3475,7 @@ const stylesManual = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -3506,7 +3604,13 @@ function ResultsScreen({ navigation, route }) {
   return (
     <GradientBackground>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: theme.space(2.5),
+            paddingBottom: theme.space(3),
+            paddingTop: theme.space(2.5) + screenTopPadding,
+          }}
+        >
           <Text style={stylesResults.sectionTitle}>Results</Text>
           {question ? (
             <>
@@ -3731,6 +3835,7 @@ const stylesLibrary = StyleSheet.create({
     flex: 1,
     padding: theme.space(2.5),
     paddingBottom: theme.space(3),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   content: {
     flex: 1,
@@ -3936,6 +4041,7 @@ const stylesJournal = StyleSheet.create({
   container: {
     flex: 1,
     padding: theme.space(2.5),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   title: {
     fontFamily: fonts.title,
@@ -4401,6 +4507,7 @@ const stylesDetail = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -4713,7 +4820,13 @@ function GuideScreen({ navigation }) {
   return (
     <GradientBackground>
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: theme.space(2.5) }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: theme.space(2.5),
+            paddingBottom: theme.space(3),
+            paddingTop: theme.space(2.5) + screenTopPadding,
+          }}
+        >
           <Pressable
             onPress={() => navigation.goBack()}
             style={stylesGuide.backButton}
@@ -4965,6 +5078,7 @@ const stylesPremium = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -5254,6 +5368,7 @@ const stylesSettings = StyleSheet.create({
   container: {
     padding: theme.space(2.5),
     paddingBottom: theme.space(4),
+    paddingTop: theme.space(2.5) + screenTopPadding,
   },
   backButton: {
     flexDirection: "row",
@@ -5367,8 +5482,21 @@ function MainTabs() {
         tabBarActiveTintColor: palette.gold,
         tabBarInactiveTintColor: palette.inkMuted,
         tabBarStyle: {
-          backgroundColor: palette.white,
-          borderTopColor: palette.border,
+          backgroundColor: palette.card,
+          borderTopColor: "rgba(176, 139, 49, 0.35)",
+          borderTopWidth: 1,
+          shadowColor: palette.goldDeep,
+          shadowOpacity: 0.16,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: -4 },
+          elevation: 10,
+        },
+        tabBarLabelStyle: {
+          fontFamily: fonts.bodyBold,
+          fontSize: 12,
+        },
+        tabBarItemStyle: {
+          paddingVertical: 6,
         },
         tabBarIcon: ({ color, size }) => {
           const icons = {
