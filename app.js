@@ -58,6 +58,7 @@ import Svg, {
   RadialGradient,
   Stop,
   Text as SvgText,
+  Circle as SvgCircle,
 } from "react-native-svg";
 import { PieChart, BarChart, Grid, XAxis } from "react-native-svg-charts";
 import { createClient } from "@supabase/supabase-js";
