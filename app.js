@@ -11,7 +11,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -49,7 +48,6 @@ import {
   Lora_600SemiBold,
 } from "@expo-google-fonts/lora";
 import Svg, {
-  Circle,
   ClipPath,
   Defs,
   G,
@@ -713,11 +711,26 @@ function ShimmerPlaceholder({ height, style }) {
   );
 }
 
-function SummaryCard({ title, subtitle, value, loading, accent, delay = 0 }) {
+function SummaryCard({
+  title,
+  subtitle,
+  value,
+  loading,
+  accent,
+  delay = 0,
+  column = 0,
+  isSolo = false,
+}) {
   const displayValue = useAnimatedCounter(value, loading);
   return (
     <MotionView
-      style={[stylesInsights.summaryCard, { borderColor: accent || palette.gold }]}
+      style={[
+        stylesInsights.summaryCard,
+        !isSolo && column === 0 && stylesInsights.summaryCardLeft,
+        !isSolo && column === 1 && stylesInsights.summaryCardRight,
+        isSolo && stylesInsights.summaryCardSolo,
+        { borderColor: accent || palette.gold },
+      ]}
       {...motionProps(delay)}
     >
       <Text style={stylesInsights.summaryLabel}>{title}</Text>
@@ -1007,7 +1020,6 @@ function TopCastsChart({ data, loading }) {
 }
 
 function InsightsOverviewScreen() {
-  const windowWidth = Dimensions.get("window").width;
   const { isPremium } = useAuth();
   const premiumMember = Boolean(isPremium);
   const navigation = useNavigation();
@@ -1167,6 +1179,11 @@ function InsightsOverviewScreen() {
     },
   ];
 
+  const summaryRows = [];
+  for (let i = 0; i < summaryCards.length; i += 2) {
+    summaryRows.push(summaryCards.slice(i, i + 2));
+  }
+
   useEffect(() => {
     const activeError =
       summaryError ||
@@ -1243,22 +1260,32 @@ function InsightsOverviewScreen() {
         </Text>
         {errorMessage ? <Text style={stylesInsights.errorText}>{errorMessage}</Text> : null}
 
-        <View
-          style={[
-            stylesInsights.summaryGrid,
-            { flexDirection: windowWidth > 768 ? "row" : "row", flexWrap: "wrap" },
-          ]}
-        >
-          {summaryCards.map((card, index) => (
-            <SummaryCard
-              key={card.title}
-              title={card.title}
-              subtitle={card.subtitle}
-              value={card.value}
-              loading={card.loading}
-              accent={index === 1 ? palette.goldLight : palette.gold}
-              delay={index * 80}
-            />
+        <View style={stylesInsights.summaryGrid}>
+          {summaryRows.map((rowCards, rowIndex) => (
+            <View
+              key={`summary-row-${rowIndex}`}
+              style={[
+                stylesInsights.summaryRow,
+                rowIndex === summaryRows.length - 1 && { marginBottom: 0 },
+              ]}
+            >
+              {rowCards.map((card, columnIndex) => {
+                const cardIndex = rowIndex * 2 + columnIndex;
+                return (
+                  <SummaryCard
+                    key={card.title}
+                    title={card.title}
+                    subtitle={card.subtitle}
+                    value={card.value}
+                    loading={card.loading}
+                    accent={cardIndex === 1 ? palette.goldLight : palette.gold}
+                    delay={cardIndex * 80}
+                    column={columnIndex}
+                    isSolo={rowCards.length === 1}
+                  />
+                );
+              })}
+            </View>
           ))}
         </View>
 
@@ -1349,11 +1376,14 @@ const stylesInsights = StyleSheet.create({
   summaryGrid: {
     marginBottom: theme.space(3),
   },
-  summaryCard: {
-    width: "48%",
-    minWidth: 160,
-    marginRight: theme.space(1),
+  summaryRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
     marginBottom: theme.space(2),
+  },
+  summaryCard: {
+    flex: 1,
+    minWidth: 150,
     padding: theme.space(2),
     borderRadius: theme.radius,
     borderWidth: 1,
@@ -1362,6 +1392,17 @@ const stylesInsights = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  summaryCardLeft: {
+    marginRight: theme.space(1),
+  },
+  summaryCardRight: {
+    marginLeft: theme.space(1),
+  },
+  summaryCardSolo: {
+    marginLeft: 0,
+    marginRight: 0,
   },
   summaryLabel: {
     fontFamily: fonts.bodyBold,
@@ -2780,6 +2821,15 @@ function GlowingHexagon() {
               <Stop offset="45%" stopColor={palette.goldLight} stopOpacity="0.85" />
               <Stop offset="100%" stopColor={palette.parchmentGold} stopOpacity="0" />
             </RadialGradient>
+            <RadialGradient id="innerGlow" cx="50%" cy="50%" r="60%">
+              <Stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+              <Stop offset="70%" stopColor="#ffcf70" stopOpacity="0" />
+            </RadialGradient>
+            <SvgLinearGradient id="edgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#fff4c9" stopOpacity="0.8" />
+              <Stop offset="55%" stopColor="rgba(255, 244, 201, 0)" stopOpacity="0" />
+              <Stop offset="100%" stopColor="#d68a1f" stopOpacity="0.6" />
+            </SvgLinearGradient>
           </Defs>
           <Circle cx="100" cy="100" r="92" fill="url(#aura)" />
         </Svg>
