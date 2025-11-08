@@ -63,6 +63,52 @@ import Svg, {
 import { PieChart, BarChart, Grid, XAxis } from "react-native-svg-charts";
 import { createClient } from "@supabase/supabase-js";
 
+let Purchases = null;
+let PurchasesLogLevel = null;
+
+try {
+  const purchasesModule = require("@revenuecat/purchases-expo");
+  Purchases = purchasesModule?.default || purchasesModule;
+  PurchasesLogLevel = purchasesModule?.LOG_LEVEL || purchasesModule?.LogLevel || null;
+} catch (error) {
+  console.log("RevenueCat SDK unavailable:", error?.message || error);
+}
+
+const readEnv = (key) => {
+  try {
+    if (typeof process !== "undefined" && process?.env && process.env[key] != null) {
+      return process.env[key];
+    }
+  } catch (error) {
+    console.log("Environment read error:", error?.message || error);
+  }
+  return undefined;
+};
+
+const REVENUECAT_CONFIG = {
+  apiKeys: {
+    ios:
+      readEnv("EXPO_PUBLIC_REVENUECAT_IOS_KEY") ||
+      readEnv("REVENUECAT_IOS_API_KEY") ||
+      readEnv("REVENUECAT_API_KEY_IOS") ||
+      "",
+    android:
+      readEnv("EXPO_PUBLIC_REVENUECAT_ANDROID_KEY") ||
+      readEnv("REVENUECAT_ANDROID_API_KEY") ||
+      readEnv("REVENUECAT_API_KEY_ANDROID") ||
+      "",
+  },
+  entitlementIds: {
+    core: "core",
+    premium: "premium",
+  },
+  packageIds: {
+    core: "core_lifetime",
+    premium: "premium_monthly",
+  },
+  offeringId: "default",
+};
+
 // 🎨 Design tokens
 const palette = {
   parchmentA: "#FAF7ED",
@@ -122,6 +168,427 @@ const screenTopPadding = Platform.select({
 });
 
 const createLocalId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const getRevenueCatApiKey = () => {
+  const platformKey = Platform.select({
+    ios: REVENUECAT_CONFIG.apiKeys.ios,
+    android: REVENUECAT_CONFIG.apiKeys.android,
+    default: REVENUECAT_CONFIG.apiKeys.android || REVENUECAT_CONFIG.apiKeys.ios,
+  });
+  return platformKey && platformKey.trim() ? platformKey.trim() : null;
+};
+
+const collectAllPackages = (offerings) => {
+  if (!offerings) return [];
+  const all = [];
+  const current = offerings.current;
+  if (current?.availablePackages?.length) {
+    all.push(...current.availablePackages);
+  }
+  const others = offerings.all || {};
+  Object.values(others).forEach((offering) => {
+    if (offering?.availablePackages?.length) {
+      offering.availablePackages.forEach((pkg) => all.push(pkg));
+    }
+  });
+  return all;
+};
+
+const resolveRevenueCatPackage = (packageOrId, offerings) => {
+  if (!packageOrId) return null;
+  if (packageOrId?.identifier && packageOrId?.product) {
+    return packageOrId;
+  }
+  const identifier =
+    typeof packageOrId === "string"
+      ? packageOrId
+      : packageOrId?.identifier || packageOrId?.packageIdentifier || packageOrId?.product?.identifier;
+  if (!identifier) return null;
+  const allPackages = collectAllPackages(offerings);
+  if (!allPackages.length) return null;
+  return (
+    allPackages.find((pkg) => {
+      const identifiers = [pkg?.identifier, pkg?.packageIdentifier, pkg?.product?.identifier].filter(Boolean);
+      return identifiers.some((value) => value === identifier);
+    }) || null
+  );
+};
+
+const shouldTreatAsCancellation = (error) => {
+  if (!error) return false;
+  const code = error?.code;
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    Boolean(error?.userCancelled) ||
+    code === "PURCHASE_CANCELLED" ||
+    code === "USER_CANCELLED" ||
+    code === "CANCELLED_PURCHASE" ||
+    message.includes("cancel")
+  );
+};
+
+const notifyPurchaseOutcome = (outcome, messages = {}) => {
+  if (!outcome) return;
+  if (outcome.success) {
+    Alert.alert(
+      messages.successTitle || "Premium unlocked",
+      messages.successMessage || "Your Premium access is now active across all devices."
+    );
+  } else if (outcome.error && !outcome.cancelled) {
+    Alert.alert(
+      messages.errorTitle || "Purchase not completed",
+      outcome.error?.message || messages.errorMessage || "Please try again."
+    );
+  }
+};
+
+const notifyRestoreOutcome = (outcome) => {
+  if (!outcome) return;
+  if (outcome.success) {
+    Alert.alert("Purchases restored", "Your active purchases are now synced on this device.");
+  } else if (outcome.error) {
+    Alert.alert("Restore failed", outcome.error?.message || "Please try again.");
+  }
+};
+
+const defaultRevenueCatState = {
+  ready: false,
+  loading: false,
+  activeAction: null,
+  activeTargetId: null,
+  offerings: null,
+  packages: { premium: null, core: null },
+  premiumPriceString: "",
+  corePriceString: "",
+  purchasePackage: async () => ({ success: false, error: new Error("Purchases unavailable") }),
+  restorePurchases: async () => ({ success: false, error: new Error("Purchases unavailable") }),
+  refreshOfferings: async () => null,
+  premiumActive: false,
+  coreActive: false,
+  activeEntitlementIds: [],
+  customerInfo: null,
+  lastError: null,
+};
+
+const RevenueCatContext = createContext(defaultRevenueCatState);
+
+function useRevenueCat() {
+  return useContext(RevenueCatContext);
+}
+
+function usePremiumPurchaseFlow(successTitle, successMessage) {
+  const { packages, purchasePackage } = useRevenueCat();
+  return useCallback(async () => {
+    const outcome = await purchasePackage(packages?.premium || REVENUECAT_CONFIG.packageIds.premium);
+    notifyPurchaseOutcome(outcome, { successTitle, successMessage });
+    return outcome;
+  }, [packages?.premium, purchasePackage, successTitle, successMessage]);
+}
+
+function useRevenueCatController(appUserID, authReady) {
+  const [isConfigured, setConfigured] = useState(false);
+  const [offerings, setOfferings] = useState(null);
+  const [customerInfo, setCustomerInfo] = useState(null);
+  const [lastError, setLastError] = useState(null);
+  const [busyState, setBusyState] = useState({ busy: false, action: null, targetId: null });
+  const configureKeyRef = useRef(null);
+  const configuringRef = useRef(false);
+  const currentUserRef = useRef(null);
+  const revenueCatApiKey = useMemo(() => getRevenueCatApiKey(), []);
+
+  useEffect(() => {
+    if (!Purchases || !revenueCatApiKey) {
+      return;
+    }
+    if (configureKeyRef.current === revenueCatApiKey || configuringRef.current) {
+      return;
+    }
+    configuringRef.current = true;
+    let cancelled = false;
+
+    const configure = async () => {
+      try {
+        if (Purchases.setLogLevel && PurchasesLogLevel?.WARN != null) {
+          Purchases.setLogLevel(PurchasesLogLevel.WARN);
+        }
+        await Purchases.configure({ apiKey: revenueCatApiKey });
+        if (cancelled) return;
+        configureKeyRef.current = revenueCatApiKey;
+        setConfigured(true);
+        setLastError(null);
+        try {
+          const info = await Purchases.getCustomerInfo();
+          if (!cancelled) {
+            setCustomerInfo(info);
+          }
+        } catch (infoError) {
+          if (!cancelled) {
+            setLastError(infoError);
+          }
+        }
+        try {
+          const nextOfferings = await Purchases.getOfferings();
+          if (!cancelled) {
+            setOfferings(nextOfferings);
+          }
+        } catch (offeringsError) {
+          if (!cancelled) {
+            setLastError(offeringsError);
+          }
+        }
+      } catch (error) {
+        console.log("RevenueCat configure error:", error?.message || error);
+        if (!cancelled) {
+          configureKeyRef.current = null;
+          setConfigured(false);
+          setLastError(error);
+        }
+      } finally {
+        configuringRef.current = false;
+      }
+    };
+
+    configure();
+
+    const listener = Purchases.addCustomerInfoUpdateListener?.((info) => {
+      setCustomerInfo(info);
+    });
+
+    return () => {
+      cancelled = true;
+      if (listener?.remove) {
+        listener.remove();
+      } else if (typeof listener === "function") {
+        listener();
+      }
+    };
+  }, [revenueCatApiKey]);
+
+  useEffect(() => {
+    if (!Purchases || !isConfigured || !authReady) {
+      return;
+    }
+    if (appUserID && currentUserRef.current === appUserID) {
+      return;
+    }
+    if (!appUserID && !currentUserRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncIdentity = async () => {
+      try {
+        if (appUserID) {
+          const result = await Purchases.logIn(appUserID);
+          if (cancelled) return;
+          currentUserRef.current = appUserID;
+          const info = result?.customerInfo || result;
+          if (info) {
+            setCustomerInfo(info);
+          }
+        } else {
+          const info = await Purchases.logOut();
+          if (cancelled) return;
+          currentUserRef.current = null;
+          setCustomerInfo(info);
+        }
+        setLastError(null);
+      } catch (error) {
+        console.log("RevenueCat identity sync error:", error?.message || error);
+        if (!cancelled) {
+          setLastError(error);
+        }
+      }
+    };
+
+    syncIdentity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appUserID, authReady, isConfigured]);
+
+  useEffect(() => {
+    if (!Purchases || !isConfigured) {
+      return;
+    }
+    if (offerings) {
+      return;
+    }
+    let cancelled = false;
+
+    const loadOfferings = async () => {
+      try {
+        const nextOfferings = await Purchases.getOfferings();
+        if (!cancelled) {
+          setOfferings(nextOfferings);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLastError(error);
+        }
+      }
+    };
+
+    loadOfferings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isConfigured, offerings]);
+
+  useEffect(() => {
+    if (!customerInfo || !appUserID) return;
+    const normalizedAppUser = customerInfo?.appUserID || customerInfo?.originalAppUserId;
+    if (normalizedAppUser && normalizedAppUser !== appUserID) {
+      console.warn(
+        "RevenueCat alias mismatch detected",
+        normalizedAppUser,
+        "expected",
+        appUserID
+      );
+    }
+  }, [customerInfo, appUserID]);
+
+  const refreshOfferings = useCallback(async () => {
+    if (!Purchases || !isConfigured) {
+      return null;
+    }
+    try {
+      const nextOfferings = await Purchases.getOfferings();
+      setOfferings(nextOfferings);
+      setLastError(null);
+      return nextOfferings;
+    } catch (error) {
+      console.log("RevenueCat offerings error:", error?.message || error);
+      setLastError(error);
+      throw error;
+    }
+  }, [isConfigured]);
+
+  const purchasePackage = useCallback(
+    async (target) => {
+      if (!Purchases || !isConfigured) {
+        const error = new Error("Purchases not ready. Please try again shortly.");
+        setLastError(error);
+        return { success: false, error };
+      }
+      const resolved = resolveRevenueCatPackage(target, offerings) ||
+        resolveRevenueCatPackage(target, { current: null, all: {} });
+      const fallbackId = typeof target === "string" ? target : null;
+      const targetId =
+        resolved?.identifier ||
+        resolved?.packageIdentifier ||
+        resolved?.product?.identifier ||
+        fallbackId;
+      if (!resolved) {
+        const error = new Error("Purchase options are unavailable. Please refresh and try again.");
+        setLastError(error);
+        return { success: false, error };
+      }
+      setBusyState({ busy: true, action: "purchase", targetId });
+      try {
+        const result = await Purchases.purchasePackage(resolved);
+        const info = result?.customerInfo || result;
+        if (info) {
+          setCustomerInfo(info);
+        }
+        setLastError(null);
+        return { success: true, result };
+      } catch (error) {
+        if (shouldTreatAsCancellation(error)) {
+          return { success: false, cancelled: true };
+        }
+        console.log("RevenueCat purchase error:", error?.message || error);
+        setLastError(error);
+        return { success: false, error };
+      } finally {
+        setBusyState({ busy: false, action: null, targetId: null });
+      }
+    },
+    [isConfigured, offerings]
+  );
+
+  const restorePurchases = useCallback(async () => {
+    if (!Purchases || !isConfigured) {
+      const error = new Error("Restore unavailable. Please try again later.");
+      setLastError(error);
+      return { success: false, error };
+    }
+    setBusyState({ busy: true, action: "restore", targetId: null });
+    try {
+      const info = await Purchases.restorePurchases();
+      if (info) {
+        setCustomerInfo(info);
+      }
+      setLastError(null);
+      return { success: true, result: info };
+    } catch (error) {
+      console.log("RevenueCat restore error:", error?.message || error);
+      setLastError(error);
+      return { success: false, error };
+    } finally {
+      setBusyState({ busy: false, action: null, targetId: null });
+    }
+  }, [isConfigured]);
+
+  const activeEntitlementIds = useMemo(() => {
+    const active = customerInfo?.entitlements?.active || {};
+    return Object.keys(active);
+  }, [customerInfo?.entitlements?.active]);
+
+  const activeEntitlements = useMemo(() => new Set(activeEntitlementIds), [activeEntitlementIds]);
+
+  const premiumPackage = useMemo(
+    () => resolveRevenueCatPackage(REVENUECAT_CONFIG.packageIds.premium, offerings),
+    [offerings]
+  );
+  const corePackage = useMemo(
+    () => resolveRevenueCatPackage(REVENUECAT_CONFIG.packageIds.core, offerings),
+    [offerings]
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      ready: isConfigured,
+      loading: busyState.busy,
+      activeAction: busyState.action,
+      activeTargetId: busyState.targetId,
+      offerings,
+      packages: { premium: premiumPackage, core: corePackage },
+      premiumPriceString: premiumPackage?.product?.priceString || "",
+      corePriceString: corePackage?.product?.priceString || "",
+      purchasePackage,
+      restorePurchases,
+      refreshOfferings,
+      premiumActive: activeEntitlements.has(REVENUECAT_CONFIG.entitlementIds.premium),
+      coreActive: activeEntitlements.has(REVENUECAT_CONFIG.entitlementIds.core),
+      activeEntitlementIds,
+      customerInfo,
+      lastError,
+    }),
+    [
+      isConfigured,
+      busyState.busy,
+      busyState.action,
+      busyState.targetId,
+      offerings,
+      premiumPackage,
+      corePackage,
+      purchasePackage,
+      restorePurchases,
+      refreshOfferings,
+      activeEntitlements,
+      activeEntitlementIds,
+      customerInfo,
+      lastError,
+    ]
+  );
+
+  return contextValue;
+}
+
 
 // 🔗 Supabase client
 export const SUPABASE_URL = "https://cvowwctcpepbctokktpn.supabase.co";
@@ -1049,6 +1516,7 @@ function InsightsOverviewScreen() {
   const { isPremium } = useAuth();
   const premiumMember = Boolean(isPremium);
   const navigation = useNavigation();
+  const { premiumPriceString } = useRevenueCat();
   const {
     data: summary,
     loading: summaryLoading,
@@ -1256,9 +1724,10 @@ function InsightsOverviewScreen() {
           <UpgradeCallout
             title="Premium analytics"
             description={
-              "Unlock weekly and monthly patterns, your casting streak, and the top hexagrams you draw most often. Premium is £2.99 per month."
+              premiumPriceString
+                ? `Unlock weekly and monthly patterns, your casting streak, and the top hexagrams you draw most often. Premium is ${premiumPriceString} per month.`
+                : "Unlock weekly and monthly patterns, your casting streak, and the top hexagrams you draw most often with Premium membership."
             }
-            onUpgrade={() => navigation.navigate("Premium")}
             icon="stats-chart-outline"
           />
         </ScrollView>
@@ -2106,12 +2575,21 @@ function SectionCard({ children, style }) {
   );
 }
 
-function GoldButton({ onPress, children, icon, kind = "primary", full = false, disabled = false }) {
+function GoldButton({
+  onPress,
+  children,
+  icon,
+  kind = "primary",
+  full = false,
+  disabled = false,
+  loading = false,
+}) {
   const primary = kind === "primary";
+  const isDisabled = disabled || loading;
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled}
+      disabled={isDisabled}
       style={({ pressed }) => [
         {
           flexDirection: "row",
@@ -2131,14 +2609,22 @@ function GoldButton({ onPress, children, icon, kind = "primary", full = false, d
         primary
           ? { backgroundColor: palette.gold, borderColor: palette.gold }
           : { backgroundColor: palette.white, borderColor: palette.gold },
-        pressed && !disabled && { opacity: 0.98 },
-        disabled && { opacity: 0.6, shadowOpacity: 0.1 },
+        pressed && !isDisabled && { opacity: 0.98 },
+        isDisabled && { opacity: 0.6, shadowOpacity: 0.1 },
       ]}
     >
-      {icon}
+      {loading ? (
+        <ActivityIndicator
+          size="small"
+          color={primary ? palette.white : palette.gold}
+          style={{ marginRight: 8 }}
+        />
+      ) : (
+        icon
+      )}
       <Text
         style={{
-          marginLeft: icon ? 8 : 0,
+          marginLeft: !loading && icon ? 8 : 0,
           fontFamily: fonts.bodyBold,
           fontSize: 16,
           color: primary ? palette.white : palette.gold,
@@ -2151,6 +2637,19 @@ function GoldButton({ onPress, children, icon, kind = "primary", full = false, d
 }
 
 function UpgradeCallout({ title, description, onUpgrade, style, icon = "sparkles-outline" }) {
+  const { premiumPriceString, loading, activeAction } = useRevenueCat();
+  const defaultPurchase = usePremiumPurchaseFlow();
+  const purchaseBusy = loading && activeAction === "purchase";
+  const buttonLabel = premiumPriceString
+    ? `Upgrade to Premium (${premiumPriceString})`
+    : "Upgrade to Premium";
+  const handlePress = useCallback(() => {
+    if (typeof onUpgrade === "function") {
+      return onUpgrade();
+    }
+    return defaultPurchase();
+  }, [onUpgrade, defaultPurchase]);
+
   return (
     <SectionCard
       style={[
@@ -2176,10 +2675,11 @@ function UpgradeCallout({ title, description, onUpgrade, style, icon = "sparkles
       </Text>
       <GoldButton
         full
-        onPress={onUpgrade}
+        onPress={handlePress}
+        loading={purchaseBusy}
         icon={<Ionicons name={icon} size={18} color={palette.white} />}
       >
-        Upgrade to Premium (£2.99/month)
+        {buttonLabel}
       </GoldButton>
     </SectionCard>
   );
@@ -2916,12 +3416,18 @@ function HomeScreen({ navigation, route }) {
   const [question, setQuestion] = useState("");
   const [menuVisible, setMenuVisible] = useState(false);
   const { session, profile, loadingProfile, signOut, refreshProfile } = useAuth();
+  const { premiumActive: premiumEntitlementActive, coreActive: coreEntitlementActive } =
+    useRevenueCat();
 
   const hasProfile = Boolean(profile);
   const profileEmail = hasProfile
     ? profile.email || session?.user?.email || "Not set"
     : session?.user?.email || "Not set";
-  const premiumStatusLabel = hasProfile
+  const premiumStatusLabel = premiumEntitlementActive
+    ? "Premium"
+    : coreEntitlementActive
+    ? "Core"
+    : hasProfile
     ? profile.subscription_tier === "premium" || profile.is_premium
       ? "Premium"
       : profile.subscription_tier === "core"
@@ -3212,6 +3718,8 @@ const stylesHome = StyleSheet.create({
 function CastScreen({ route, navigation }) {
   const { isPremium } = useAuth();
   const premiumMember = Boolean(isPremium);
+  const { premiumPriceString } = useRevenueCat();
+  const startPremiumPurchase = usePremiumPurchaseFlow();
   const question = route.params?.question ?? null;
   const [all, setAll] = useState([]);
   const [lines, setLines] = useState([]);
@@ -3308,14 +3816,16 @@ function CastScreen({ route, navigation }) {
                 Manual Casting
               </GoldButton>
             ) : (
-              <UpgradeCallout
-                title="Manual casting is a Premium ritual"
-                description={
-                  "Unlock tactile casting methods, AI summaries, and deeper insights with Premium for £2.99 per month."
-                }
-                onUpgrade={() => navigation.navigate("Premium")}
-                icon="keypad-outline"
-              />
+            <UpgradeCallout
+              title="Manual casting is a Premium ritual"
+              description={
+                premiumPriceString
+                  ? `Unlock tactile casting methods, AI summaries, and deeper insights with Premium for ${premiumPriceString} per month.`
+                  : "Unlock tactile casting methods, AI summaries, and deeper insights with Premium membership."
+              }
+              onUpgrade={startPremiumPurchase}
+              icon="keypad-outline"
+            />
             )
           ) : null}
 
@@ -3345,6 +3855,8 @@ function CastScreen({ route, navigation }) {
 function ManualCastingScreen({ route, navigation }) {
   const { isPremium } = useAuth();
   const premiumMember = Boolean(isPremium);
+  const { premiumPriceString } = useRevenueCat();
+  const startPremiumPurchase = usePremiumPurchaseFlow();
   const question = route.params?.question ?? null;
   const [inputs, setInputs] = useState(["", "", "", "", "", ""]);
   const [hexagrams, setHexagrams] = useState([]);
@@ -3368,8 +3880,12 @@ function ManualCastingScreen({ route, navigation }) {
           >
             <UpgradeCallout
               title="Manual casting requires Premium"
-              description="Experience the full ritual of the I Ching with manual casting, AI-guided summaries, and advanced analytics when you upgrade."
-              onUpgrade={() => navigation.navigate("Premium")}
+              description={
+                premiumPriceString
+                  ? `Experience the full ritual of the I Ching with manual casting, AI-guided summaries, and advanced analytics for ${premiumPriceString} per month.`
+                  : "Experience the full ritual of the I Ching with manual casting, AI-guided summaries, and advanced analytics when you upgrade."
+              }
+              onUpgrade={startPremiumPurchase}
               icon="sparkles-outline"
             />
           </ScrollView>
@@ -4206,6 +4722,8 @@ function JournalDetailScreen({ route, navigation }) {
   const userId = session?.user?.id;
   const { entries, updateEntryNote, setEntryAiSummary, fetchEntryAiSummary } =
     useJournal();
+  const { premiumPriceString } = useRevenueCat();
+  const startPremiumPurchase = usePremiumPurchaseFlow();
   const entry = useMemo(() => entries.find((item) => item.id === id), [entries, id]);
   const [note, setNote] = useState(entry?.note || "");
   const [limitReached, setLimitReached] = useState(false);
@@ -4509,9 +5027,11 @@ function JournalDetailScreen({ route, navigation }) {
             <UpgradeCallout
               title="Invite the AI Oracle"
               description={
-                "Premium members receive up to 100 personalised AI summaries every month. Upgrade to unlock this guidance."
+                premiumPriceString
+                  ? `Premium members receive up to 100 personalised AI summaries every month from ${premiumPriceString} per month. Upgrade to unlock this guidance.`
+                  : "Premium members receive up to 100 personalised AI summaries every month. Upgrade to unlock this guidance."
               }
-              onUpgrade={() => navigation.navigate("Premium")}
+              onUpgrade={startPremiumPurchase}
               icon="sparkles-outline"
             />
           )}
@@ -5009,8 +5529,41 @@ const stylesGuide = StyleSheet.create({
 // 💎 Premium screen
 function PremiumScreen({ navigation }) {
   const { isPremium: premiumStatus, subscriptionTier } = useAuth();
-  const isPremiumMember = Boolean(premiumStatus);
-  const currentTier = isPremiumMember ? "premium" : subscriptionTier || "core";
+  const {
+    packages,
+    premiumPriceString,
+    corePriceString,
+    purchasePackage,
+    restorePurchases,
+    loading: transactionLoading,
+    activeAction,
+    activeTargetId,
+    premiumActive,
+    coreActive,
+  } = useRevenueCat();
+  const isPremiumMember = Boolean(premiumStatus || premiumActive);
+  const startPremiumPurchase = usePremiumPurchaseFlow(
+    "Welcome to Premium",
+    "Your Premium access is now active. Enjoy the full experience!"
+  );
+  const currentTier = isPremiumMember
+    ? "premium"
+    : coreActive || subscriptionTier === "core"
+    ? "core"
+    : subscriptionTier || "core";
+
+  const premiumPackageRef = packages?.premium;
+  const corePackageRef = packages?.core;
+  const premiumPackageId =
+    premiumPackageRef?.identifier ||
+    premiumPackageRef?.packageIdentifier ||
+    premiumPackageRef?.product?.identifier ||
+    REVENUECAT_CONFIG.packageIds.premium;
+  const corePackageId =
+    corePackageRef?.identifier ||
+    corePackageRef?.packageIdentifier ||
+    corePackageRef?.product?.identifier ||
+    REVENUECAT_CONFIG.packageIds.core;
 
   const featureMatrix = [
     { label: "Complete hexagram library", core: true, premium: true },
@@ -5022,18 +5575,36 @@ function PremiumScreen({ navigation }) {
     { label: "Cloud sync up to 1,000 entries", core: false, premium: true },
   ];
 
-  const handleUpgrade = useCallback(async () => {
-    const mailto = "mailto:i.ching.insights64@gmail.com?subject=Upgrade%20to%20AI%20Ching%20Premium";
-    try {
-      const canOpen = await Linking.canOpenURL(mailto);
-      if (!canOpen) {
-        throw new Error("No email app available");
-      }
-      await Linking.openURL(mailto);
-    } catch (error) {
-      Alert.alert("Unable to open email", error?.message || "Please try again.");
-    }
-  }, []);
+  const premiumPurchaseBusy =
+    transactionLoading && activeAction === "purchase" && activeTargetId === premiumPackageId;
+  const corePurchaseBusy =
+    transactionLoading && activeAction === "purchase" && activeTargetId === corePackageId;
+  const restoreBusy = transactionLoading && activeAction === "restore";
+
+  const handleCoreUnlock = useCallback(async () => {
+    const target = corePackageRef || REVENUECAT_CONFIG.packageIds.core;
+    const outcome = await purchasePackage(target);
+    notifyPurchaseOutcome(outcome, {
+      successTitle: "Core unlocked",
+      successMessage: "Core features are now available on your account.",
+    });
+    return outcome;
+  }, [corePackageRef, purchasePackage]);
+
+  const handleRestore = useCallback(async () => {
+    const outcome = await restorePurchases();
+    notifyRestoreOutcome(outcome);
+    return outcome;
+  }, [restorePurchases]);
+
+  const premiumButtonLabel = premiumPriceString
+    ? `Upgrade to Premium (${premiumPriceString})`
+    : "Upgrade to Premium";
+  const coreButtonLabel = corePriceString
+    ? `Unlock Core (${corePriceString})`
+    : "Unlock Core";
+  const corePriceLabel = corePriceString || "Loading price…";
+  const premiumPriceLabel = premiumPriceString || "Loading price…";
 
   return (
     <GradientBackground>
@@ -5055,7 +5626,7 @@ function PremiumScreen({ navigation }) {
                 ]}
               >
                 <Text style={stylesPremium.tierLabel}>Core</Text>
-                <Text style={stylesPremium.price}>£4.99</Text>
+                <Text style={stylesPremium.price}>{corePriceLabel}</Text>
                 <Text style={stylesPremium.priceSub}>One-time unlock</Text>
                 <Text style={stylesPremium.tierBody}>
                   Essential casting, journaling, and the full 64 hexagram library.
@@ -5064,6 +5635,17 @@ function PremiumScreen({ navigation }) {
                   <View style={stylesPremium.badge}>
                     <Text style={stylesPremium.badgeText}>Current plan</Text>
                   </View>
+                ) : null}
+                {!isPremiumMember && !coreActive ? (
+                  <GoldButton
+                    full
+                    kind="secondary"
+                    onPress={handleCoreUnlock}
+                    loading={corePurchaseBusy}
+                    icon={<Ionicons name="shield-checkmark-outline" size={18} color={palette.gold} />}
+                  >
+                    {coreButtonLabel}
+                  </GoldButton>
                 ) : null}
               </View>
               <View
@@ -5074,7 +5656,7 @@ function PremiumScreen({ navigation }) {
                 ]}
               >
                 <Text style={stylesPremium.tierLabel}>Premium</Text>
-                <Text style={stylesPremium.price}>£2.99</Text>
+                <Text style={stylesPremium.price}>{premiumPriceLabel}</Text>
                 <Text style={stylesPremium.priceSub}>Per month</Text>
                 <Text style={stylesPremium.tierBody}>
                   Unlock AI summaries, manual casting, cloud backup, and rich analytics.
@@ -5122,12 +5704,22 @@ function PremiumScreen({ navigation }) {
             ) : (
               <GoldButton
                 full
-                onPress={handleUpgrade}
+                onPress={startPremiumPurchase}
+                loading={premiumPurchaseBusy}
                 icon={<Ionicons name="sparkles-outline" size={18} color={palette.white} />}
               >
-                Upgrade to Premium (£2.99/month)
+                {premiumButtonLabel}
               </GoldButton>
             )}
+            <GoldButton
+              full
+              kind="secondary"
+              onPress={handleRestore}
+              loading={restoreBusy}
+              icon={<Ionicons name="refresh-outline" size={18} color={palette.gold} />}
+            >
+              Restore purchases
+            </GoldButton>
           </SectionCard>
         </ScrollView>
       </SafeAreaView>
@@ -5649,10 +6241,25 @@ export default function App() {
     await supabase.auth.signOut();
   }, []);
 
+  const revenueCatValue = useRevenueCatController(session?.user?.id ?? null, authReady);
+
   const premiumStatus = useMemo(
-    () => profile?.subscription_tier === "premium" || profile?.is_premium,
-    [profile?.is_premium, profile?.subscription_tier]
+    () =>
+      revenueCatValue?.premiumActive ||
+      profile?.subscription_tier === "premium" ||
+      profile?.is_premium,
+    [
+      profile?.is_premium,
+      profile?.subscription_tier,
+      revenueCatValue?.premiumActive,
+    ]
   );
+
+  const resolvedSubscriptionTier = useMemo(() => {
+    if (revenueCatValue?.premiumActive) return "premium";
+    if (revenueCatValue?.coreActive) return "core";
+    return profile?.subscription_tier ?? null;
+  }, [profile?.subscription_tier, revenueCatValue?.coreActive, revenueCatValue?.premiumActive]);
 
   const authValue = useMemo(
     () => ({
@@ -5663,7 +6270,9 @@ export default function App() {
       signOut,
       authReady,
       isPremium: premiumStatus,
-      subscriptionTier: profile?.subscription_tier ?? null,
+      subscriptionTier: resolvedSubscriptionTier,
+      revenueCatCustomerInfo: revenueCatValue?.customerInfo ?? null,
+      revenueCatEntitlements: revenueCatValue?.activeEntitlementIds ?? [],
     }),
     [
       session,
@@ -5673,6 +6282,9 @@ export default function App() {
       signOut,
       authReady,
       premiumStatus,
+      resolvedSubscriptionTier,
+      revenueCatValue?.customerInfo,
+      revenueCatValue?.activeEntitlementIds,
     ]
   );
 
@@ -5680,11 +6292,13 @@ export default function App() {
 
   return (
     <AuthContext.Provider value={authValue}>
-      <JournalProvider>
-        <NavigationContainer theme={navTheme}>
-          {session ? <MainTabs /> : <AuthStackScreen />}
-        </NavigationContainer>
-      </JournalProvider>
+      <RevenueCatContext.Provider value={revenueCatValue || defaultRevenueCatState}>
+        <JournalProvider>
+          <NavigationContainer theme={navTheme}>
+            {session ? <MainTabs /> : <AuthStackScreen />}
+          </NavigationContainer>
+        </JournalProvider>
+      </RevenueCatContext.Provider>
     </AuthContext.Provider>
   );
 }
