@@ -66,12 +66,64 @@ import { createClient } from "@supabase/supabase-js";
 let Purchases = null;
 let PurchasesLogLevel = null;
 
-try {
-  const purchasesModule = require("@revenuecat/purchases-expo");
-  Purchases = purchasesModule?.default || purchasesModule;
-  PurchasesLogLevel = purchasesModule?.LOG_LEVEL || purchasesModule?.LogLevel || null;
-} catch (error) {
-  console.log("RevenueCat SDK unavailable:", error?.message || error);
+const getGlobalObject = () => {
+  if (typeof globalThis !== "undefined") return globalThis;
+  if (typeof global !== "undefined") return global;
+  if (typeof window !== "undefined") return window;
+  if (typeof self !== "undefined") return self;
+  return {};
+};
+
+const globalRef = getGlobalObject();
+
+const attachRevenueCatModule = (maybeModule) => {
+  if (!maybeModule) return null;
+  const resolved = maybeModule?.default || maybeModule;
+  if (!resolved) return null;
+  if (Purchases === resolved) {
+    return resolved;
+  }
+  Purchases = resolved;
+  PurchasesLogLevel =
+    resolved?.LOG_LEVEL || resolved?.LogLevel || resolved?.LOG_LEVELS || PurchasesLogLevel;
+  return resolved;
+};
+
+const resolveRevenueCatModule = () => {
+  const candidates = [
+    globalRef?.RevenueCatPurchases,
+    globalRef?.RevenueCat?.Purchases,
+    globalRef?.RevenueCat?.PurchasesModule,
+    globalRef?.ExpoModules?.RevenueCatPurchases,
+    globalRef?.ExpoModules?.RevenueCatPurchasesModule,
+    globalRef?.ExpoModulesProxy?.RevenueCatPurchases,
+    globalRef?.NativeModules?.RevenueCatPurchases,
+    globalRef?.expo?.modulesProxy?.RevenueCatPurchases,
+  ];
+
+  for (const candidate of candidates) {
+    const resolved = candidate?.default || candidate;
+    if (resolved && (resolved.configure || resolved.purchasePackage || resolved.purchaseProduct)) {
+      return resolved;
+    }
+  }
+
+  return null;
+};
+
+attachRevenueCatModule(resolveRevenueCatModule());
+
+if (globalRef && !globalRef.__setRevenueCatPurchasesModule) {
+  Object.defineProperty(globalRef, "__setRevenueCatPurchasesModule", {
+    value: (moduleCandidate) => attachRevenueCatModule(moduleCandidate),
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+}
+
+if (!Purchases) {
+  console.log("RevenueCat SDK unavailable: purchases features are disabled by default.");
 }
 
 const readEnv = (key) => {
@@ -141,19 +193,10 @@ const fonts = {
 // avoid ReferenceError crashes when the bundle hasn't refreshed fully.
 const ensureLegacyCircle = (maybeCircle) => {
   const fallback = maybeCircle || ((props) => null);
-  const globalRef =
-    typeof globalThis !== "undefined"
-      ? globalThis
-      : typeof global !== "undefined"
-      ? global
-      : typeof window !== "undefined"
-      ? window
-      : typeof self !== "undefined"
-      ? self
-      : null;
+  const target = globalRef || null;
 
-  if (globalRef && !globalRef.Circle) {
-    globalRef.Circle = fallback;
+  if (target && !target.Circle) {
+    target.Circle = fallback;
   }
 
   return fallback;
