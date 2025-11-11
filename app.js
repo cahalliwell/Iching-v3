@@ -26,6 +26,7 @@ import {
   View,
   useWindowDimensions,
   Share,
+  Dimensions,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -60,7 +61,7 @@ import Svg, {
   Text as SvgText,
   Circle as SvgCircle,
 } from "react-native-svg";
-import { BarChart, Grid, XAxis } from "react-native-svg-charts";
+import { BarChart } from "react-native-chart-kit";
 import { createClient } from "@supabase/supabase-js";
 
 let Purchases = null;
@@ -1268,22 +1269,47 @@ function HexagonLabel({ cx, cy, value, size = "small", fill = palette.white, str
   );
 }
 
+function useInsightsChartDimensions(styleRef, minWidth = 200) {
+  const { width: windowWidth } = useWindowDimensions();
+  const baseWidth = Dimensions.get("window").width;
+  const measuredWidth = windowWidth || baseWidth;
+  const horizontalPadding = theme.space(3) * 2 + theme.space(2) * 2;
+  const rawWidth = Math.max(0, measuredWidth - horizontalPadding);
+  const chartWidth = Math.max(minWidth, rawWidth);
+  const flattenedStyle = StyleSheet.flatten(styleRef) || {};
+  const chartHeight = flattenedStyle.height || flattenedStyle.minHeight || 180;
+  return { chartWidth, chartHeight };
+}
+
 function WeeklyChart({ data, loading }) {
   const chartData = useMemo(() => (Array.isArray(data) && data.length ? data : MOCK_WEEKLY), [data]);
   const hasData = chartData.some((item) => (item?.readings || 0) > 0);
   const progress = useChartProgress([JSON.stringify(chartData)], loading || !hasData);
   const animatedValues = chartData.map((item) => (hasData ? item.readings * progress : 0));
+  const { chartWidth, chartHeight } = useInsightsChartDimensions(stylesInsights.barChart);
 
-  const Labels = ({ x, y, bandwidth }) =>
-    chartData.map((item, index) => {
-      if (!item || item.readings <= 0) return null;
-      const cx = x(index) + bandwidth / 2;
-      const currentValue = animatedValues[index];
-      const cy = Math.min(y(currentValue) - 18, y(0) - 18);
-      return (
-        <HexagonLabel key={`${item.weekday}-${index}`} cx={cx} cy={Math.max(cy, 18)} value={item.readings} />
-      );
-    });
+  const chartConfig = useMemo(
+    () => ({
+      backgroundColor: palette.card,
+      backgroundGradientFrom: palette.card,
+      backgroundGradientTo: palette.card,
+      decimalPlaces: 0,
+      color: (opacity = 1) => palette.gold,
+      fillShadowGradient: palette.gold,
+      fillShadowGradientOpacity: 1,
+      barPercentage: 0.55,
+      propsForBackgroundLines: {
+        stroke: palette.border,
+        strokeDasharray: "",
+      },
+      labelColor: (opacity = 1) => palette.inkMuted,
+      propsForLabels: {
+        fontFamily: fonts.body,
+        fontSize: 12,
+      },
+    }),
+    []
+  );
 
   if (loading) {
     return <ShimmerPlaceholder height={200} style={stylesInsights.chartPlaceholder} />;
@@ -1298,27 +1324,48 @@ function WeeklyChart({ data, loading }) {
   }
 
   const values = animatedValues;
+  const labels = chartData.map((item) => item?.weekday || "");
+  const chartKitData = {
+    labels,
+    datasets: [
+      {
+        data: values,
+      },
+    ],
+  };
 
   return (
-    <View>
-      <BarChart
-        style={stylesInsights.barChart}
-        data={values}
-        svg={{ fill: palette.gold }}
-        contentInset={{ top: 20, bottom: 24 }}
-        spacingInner={0.35}
-      >
-        <Grid direction={Grid.Direction.HORIZONTAL} svg={{ stroke: palette.border }} />
-        <Labels />
-      </BarChart>
-      <XAxis
-        style={stylesInsights.xAxis}
-        data={values}
-        formatLabel={(value, index) => chartData[index]?.weekday || ""}
-        contentInset={{ left: 18, right: 18 }}
-        svg={{ fontFamily: fonts.body, fontSize: 12, fill: palette.inkMuted }}
-      />
-    </View>
+    <BarChart
+      style={stylesInsights.barChart}
+      data={chartKitData}
+      width={chartWidth}
+      height={chartHeight}
+      chartConfig={chartConfig}
+      fromZero
+      withHorizontalLabels={false}
+      withVerticalLabels
+      withInnerLines
+      withHorizontalLines
+      withVerticalLines={false}
+      segments={4}
+      showBarTops={false}
+      showValuesOnTopOfBars={false}
+      yAxisSuffix=""
+      barRadius={12}
+      flatColor
+      renderCustomBarContent={({ index, value, x, y, width: barWidth }) => {
+        if (!chartData[index] || value <= 0) return null;
+        const cy = Math.max(y - 18, 18);
+        return (
+          <HexagonLabel
+            key={`${chartData[index]?.weekday || "day"}-${index}`}
+            cx={x + barWidth / 2}
+            cy={cy}
+            value={Math.round(chartData[index].readings)}
+          />
+        );
+      }}
+    />
   );
 }
 
@@ -1327,23 +1374,33 @@ function MonthlyChart({ data, loading }) {
   const hasData = chartData.some((item) => (item?.readings || 0) > 0);
   const progress = useChartProgress([JSON.stringify(chartData)], loading || !hasData);
   const animatedValues = chartData.map((item) => (hasData ? item.readings * progress : 0));
+  const { chartWidth, chartHeight } = useInsightsChartDimensions(
+    stylesInsights.barChartTall,
+    220
+  );
 
-  const Labels = ({ x, y, bandwidth }) =>
-    chartData.map((item, index) => {
-      if (!item || item.readings <= 0) return null;
-      const cx = x(index) + bandwidth / 2;
-      const currentValue = animatedValues[index];
-      const cy = Math.min(y(currentValue) - 18, y(0) - 18);
-      return (
-        <HexagonLabel
-          key={`${item.month}-${index}`}
-          cx={cx}
-          cy={Math.max(cy, 18)}
-          value={item.readings}
-          size="small"
-        />
-      );
-    });
+  const chartConfig = useMemo(
+    () => ({
+      backgroundColor: palette.card,
+      backgroundGradientFrom: palette.card,
+      backgroundGradientTo: palette.card,
+      decimalPlaces: 0,
+      color: (opacity = 1) => palette.gold,
+      fillShadowGradient: palette.gold,
+      fillShadowGradientOpacity: 1,
+      barPercentage: 0.6,
+      propsForBackgroundLines: {
+        stroke: palette.border,
+        strokeDasharray: "",
+      },
+      labelColor: (opacity = 1) => palette.inkMuted,
+      propsForLabels: {
+        fontFamily: fonts.body,
+        fontSize: 12,
+      },
+    }),
+    []
+  );
 
   if (loading) {
     return <ShimmerPlaceholder height={220} style={stylesInsights.chartPlaceholder} />;
@@ -1358,27 +1415,49 @@ function MonthlyChart({ data, loading }) {
   }
 
   const values = animatedValues;
+  const labels = chartData.map((item) => item?.month || "");
+  const chartKitData = {
+    labels,
+    datasets: [
+      {
+        data: values,
+      },
+    ],
+  };
 
   return (
-    <View>
-      <BarChart
-        style={stylesInsights.barChartTall}
-        data={values}
-        svg={{ fill: palette.gold }}
-        contentInset={{ top: 24, bottom: 24 }}
-        spacingInner={0.25}
-      >
-        <Grid direction={Grid.Direction.HORIZONTAL} svg={{ stroke: palette.border }} />
-        <Labels />
-      </BarChart>
-      <XAxis
-        style={stylesInsights.xAxis}
-        data={values}
-        formatLabel={(value, index) => chartData[index]?.month || ""}
-        contentInset={{ left: 20, right: 20 }}
-        svg={{ fontFamily: fonts.body, fontSize: 12, fill: palette.inkMuted }}
-      />
-    </View>
+    <BarChart
+      style={stylesInsights.barChartTall}
+      data={chartKitData}
+      width={chartWidth}
+      height={chartHeight}
+      chartConfig={chartConfig}
+      fromZero
+      withHorizontalLabels={false}
+      withVerticalLabels
+      withInnerLines
+      withHorizontalLines
+      withVerticalLines={false}
+      segments={5}
+      showBarTops={false}
+      showValuesOnTopOfBars={false}
+      yAxisSuffix=""
+      barRadius={12}
+      flatColor
+      renderCustomBarContent={({ index, value, x, y, width: barWidth }) => {
+        if (!chartData[index] || value <= 0) return null;
+        const cy = Math.max(y - 18, 18);
+        return (
+          <HexagonLabel
+            key={`${chartData[index]?.month || "month"}-${index}`}
+            cx={x + barWidth / 2}
+            cy={cy}
+            value={Math.round(chartData[index].readings)}
+            size="small"
+          />
+        );
+      }}
+    />
   );
 }
 
@@ -1408,24 +1487,30 @@ function TopCastsChart({ data, loading }) {
   const animatedValues = chartData.map((item) =>
     hasData ? (item.total_casts || 0) * progress : 0
   );
+  const { chartWidth, chartHeight } = useInsightsChartDimensions(stylesInsights.barChart);
 
-  const Labels = ({ x, y, bandwidth }) =>
-    chartData.map((item, index) => {
-      if (!item || item.total_casts <= 0) return null;
-      const cx = x(index) + bandwidth / 2;
-      const cy = Math.min(y(animatedValues[index]) - 18, y(0) - 18);
-      return (
-        item.total_casts > 0 ? (
-          <HexagonLabel
-            key={`top-cast-${item.hexagram_primary ?? index}-${index}`}
-            cx={cx}
-            cy={Math.max(cy, 18)}
-            value={item.total_casts}
-            size="small"
-          />
-        ) : null
-      );
-    });
+  const chartConfig = useMemo(
+    () => ({
+      backgroundColor: palette.card,
+      backgroundGradientFrom: palette.card,
+      backgroundGradientTo: palette.card,
+      decimalPlaces: 0,
+      color: (opacity = 1) => palette.gold,
+      fillShadowGradient: palette.gold,
+      fillShadowGradientOpacity: 1,
+      barPercentage: 0.55,
+      propsForBackgroundLines: {
+        stroke: palette.border,
+        strokeDasharray: "",
+      },
+      labelColor: (opacity = 1) => palette.ink,
+      propsForLabels: {
+        fontFamily: fonts.bodyBold,
+        fontSize: 12,
+      },
+    }),
+    []
+  );
 
   if (loading) {
     return <ShimmerPlaceholder height={220} style={stylesInsights.chartPlaceholder} />;
@@ -1441,35 +1526,51 @@ function TopCastsChart({ data, loading }) {
     );
   }
 
+  const labels = chartData.map((item) =>
+    item?.hexagram_primary != null ? `Hex ${item.hexagram_primary}` : ""
+  );
+  const chartKitData = {
+    labels,
+    datasets: [
+      {
+        data: animatedValues,
+      },
+    ],
+  };
+
   return (
-    <View>
-      <BarChart
-        style={stylesInsights.barChart}
-        data={animatedValues}
-        svg={{ fill: palette.gold }}
-        contentInset={{ top: 20, bottom: 24 }}
-        spacingInner={0.3}
-      >
-        <Grid direction={Grid.Direction.HORIZONTAL} svg={{ stroke: palette.border }} />
-        <Labels />
-      </BarChart>
-      <XAxis
-        style={stylesInsights.xAxis}
-        data={animatedValues}
-        formatLabel={(value, index) =>
-          chartData[index]?.hexagram_primary != null
-            ? `Hex ${chartData[index].hexagram_primary}`
-            : ""
-        }
-        contentInset={{ left: 24, right: 24 }}
-        svg={{
-          fontFamily: fonts.bodyBold,
-          fontSize: 12,
-          fill: palette.ink,
-          textAnchor: "middle",
-        }}
-      />
-    </View>
+    <BarChart
+      style={stylesInsights.barChart}
+      data={chartKitData}
+      width={chartWidth}
+      height={chartHeight}
+      chartConfig={chartConfig}
+      fromZero
+      withHorizontalLabels={false}
+      withVerticalLabels
+      withInnerLines
+      withHorizontalLines
+      withVerticalLines={false}
+      segments={4}
+      showBarTops={false}
+      showValuesOnTopOfBars={false}
+      yAxisSuffix=""
+      barRadius={12}
+      flatColor
+      renderCustomBarContent={({ index, value, x, y, width: barWidth }) => {
+        if (!chartData[index] || value <= 0) return null;
+        const cy = Math.max(y - 18, 18);
+        return (
+          <HexagonLabel
+            key={`top-cast-${chartData[index]?.hexagram_primary ?? index}-${index}`}
+            cx={x + barWidth / 2}
+            cy={cy}
+            value={Math.round(chartData[index].total_casts)}
+            size="small"
+          />
+        );
+      }}
+    />
   );
 }
 
@@ -1924,10 +2025,6 @@ const stylesInsights = StyleSheet.create({
   },
   barChartTall: {
     height: 220,
-  },
-  xAxis: {
-    marginHorizontal: -10,
-    marginTop: theme.space(1),
   },
   chartPlaceholder: {
     borderRadius: theme.radius,
