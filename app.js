@@ -60,7 +60,7 @@ import Svg, {
   Text as SvgText,
   Circle as SvgCircle,
 } from "react-native-svg";
-import { PieChart, BarChart, Grid, XAxis } from "react-native-svg-charts";
+import { BarChart, Grid, XAxis } from "react-native-svg-charts";
 import { createClient } from "@supabase/supabase-js";
 
 let Purchases = null;
@@ -1031,54 +1031,6 @@ function useInsightsTopCasts() {
   return { data, loading, error, refetch: fetchTopCasts };
 }
 
-const MOCK_BALANCE = {
-  yin_percent: 50,
-  yang_percent: 50,
-};
-
-function useInsightsBalance() {
-  const [data, setData] = useState(MOCK_BALANCE);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const fetchBalance = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError) throw userError;
-      if (!user) {
-        setData(MOCK_BALANCE);
-        setLoading(false);
-        return;
-      }
-
-      const { data: rows, error: queryError } = await supabase
-        .from("insights_balance")
-        .select("yin_percent, yang_percent")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (queryError) throw queryError;
-      setData(rows || MOCK_BALANCE);
-    } catch (err) {
-      console.log("Insights balance error:", err?.message || err);
-      setError(err);
-      setData(MOCK_BALANCE);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchBalance();
-  }, [fetchBalance]);
-
-  return { data, loading, error, refetch: fetchBalance };
-}
-
 const MOCK_STREAK = 0;
 
 function useReadingStreak() {
@@ -1290,40 +1242,6 @@ function CounterRow({ label, value, loading }) {
       ) : (
         <Text style={stylesInsights.counterValue}>{displayValue}</Text>
       )}
-    </View>
-  );
-}
-
-function BalancePie({ yin, yang, loading }) {
-  if (loading) {
-    return <ShimmerPlaceholder height={180} style={stylesInsights.chartPlaceholder} />;
-  }
-
-  const data = [
-    {
-      key: "yin",
-      value: yin,
-      svg: { fill: palette.gold },
-      arc: { outerRadius: "100%", cornerRadius: 12 },
-    },
-    {
-      key: "yang",
-      value: yang,
-      svg: { fill: palette.goldLight },
-      arc: { outerRadius: "100%", cornerRadius: 12 },
-    },
-  ];
-
-  return (
-    <View style={stylesInsights.pieWrapper}>
-      <PieChart style={stylesInsights.pieChart} data={data} innerRadius={"55%"} />
-      <View style={stylesInsights.pieLabels}>
-        <Text style={stylesInsights.pieValue}>{Math.round(yin)}%</Text>
-        <Text style={stylesInsights.pieCaption}>Yin</Text>
-        <View style={stylesInsights.pieDivider} />
-        <Text style={stylesInsights.pieValue}>{Math.round(yang)}%</Text>
-        <Text style={stylesInsights.pieCaption}>Yang</Text>
-      </View>
     </View>
   );
 }
@@ -1573,12 +1491,6 @@ function InsightsOverviewScreen() {
     refetch: refetchCounts,
   } = useInsightsCounts();
   const {
-    data: balance,
-    loading: balanceLoading,
-    error: balanceError,
-    refetch: refetchBalance,
-  } = useInsightsBalance();
-  const {
     data: streak,
     loading: streakLoading,
     error: streakError,
@@ -1633,13 +1545,11 @@ function InsightsOverviewScreen() {
   const refetchAll = useCallback(() => {
     refetchSummary();
     refetchCounts();
-    refetchBalance();
     refetchStreak();
     refetchWeekly();
     refetchMonthly();
     refetchTopCasts();
   }, [
-    refetchBalance,
     refetchCounts,
     refetchMonthly,
     refetchStreak,
@@ -1725,7 +1635,6 @@ function InsightsOverviewScreen() {
     const activeError =
       summaryError ||
       countsError ||
-      balanceError ||
       streakError ||
       weeklyError ||
       monthlyError ||
@@ -1736,7 +1645,6 @@ function InsightsOverviewScreen() {
       setErrorMessage(null);
     }
   }, [
-    balanceError,
     countsError,
     monthlyError,
     streakError,
@@ -1856,28 +1764,19 @@ function InsightsOverviewScreen() {
           />
         </MotionView>
 
-        <MotionView style={stylesInsights.balanceCard} {...motionProps(160)}>
-          <Text style={stylesInsights.sectionTitle}>Energetic balance</Text>
-          <BalancePie
-            yin={balance.yin_percent}
-            yang={balance.yang_percent}
-            loading={balanceLoading}
-          />
-        </MotionView>
-
-        <MotionView style={stylesInsights.chartCard} {...motionProps(200)}>
+        <MotionView style={stylesInsights.chartCard} {...motionProps(160)}>
           <Text style={stylesInsights.sectionTitle}>Weekly readings</Text>
           <Text style={stylesInsights.sectionCaption}>Mon to Sun</Text>
           <WeeklyChart data={weeklyData} loading={weeklyLoading} />
         </MotionView>
 
-        <MotionView style={stylesInsights.chartCard} {...motionProps(240)}>
+        <MotionView style={stylesInsights.chartCard} {...motionProps(200)}>
           <Text style={stylesInsights.sectionTitle}>Monthly readings</Text>
           <Text style={stylesInsights.sectionCaption}>Past 12 months</Text>
           <MonthlyChart data={monthlyData} loading={monthlyLoading} />
         </MotionView>
 
-        <MotionView style={stylesInsights.chartCard} {...motionProps(280)}>
+        <MotionView style={stylesInsights.chartCard} {...motionProps(240)}>
           <Text style={stylesInsights.sectionTitle}>Top 5 casts</Text>
           <Text style={stylesInsights.sectionCaption}>Most frequent hexagrams</Text>
           <TopCastsChart data={topCastsData} loading={topCastsLoading} />
@@ -2007,47 +1906,6 @@ const stylesInsights = StyleSheet.create({
   },
   counterPlaceholder: {
     width: 48,
-  },
-  balanceCard: {
-    backgroundColor: palette.card,
-    borderRadius: theme.radius,
-    borderWidth: 1,
-    borderColor: palette.border,
-    padding: theme.space(2),
-    marginBottom: theme.space(3),
-    shadowColor: palette.goldDeep,
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  pieWrapper: {
-    alignItems: "center",
-  },
-  pieChart: {
-    height: 200,
-    width: 200,
-  },
-  pieLabels: {
-    position: "absolute",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pieValue: {
-    fontFamily: fonts.title,
-    fontSize: 20,
-    color: palette.ink,
-  },
-  pieCaption: {
-    fontFamily: fonts.body,
-    fontSize: 13,
-    color: palette.inkMuted,
-    marginBottom: 4,
-  },
-  pieDivider: {
-    height: 1,
-    width: 60,
-    backgroundColor: palette.border,
-    marginVertical: 6,
   },
   chartCard: {
     backgroundColor: palette.card,
@@ -2192,18 +2050,44 @@ function JournalProvider({ children }) {
     [userId]
   );
 
+  const normaliseHexagramRef = useCallback((detail, fallbackNumber) => {
+    const numberCandidate =
+      detail && detail.number != null ? detail.number : fallbackNumber;
+    const parsedNumber = parseHexNumber(numberCandidate);
+    if (detail) {
+      return {
+        ...detail,
+        number:
+          parsedNumber != null
+            ? parsedNumber
+            : detail.number != null
+            ? detail.number
+            : null,
+      };
+    }
+    if (parsedNumber == null) {
+      return null;
+    }
+    return { number: parsedNumber };
+  }, []);
+
   const hydrateEntry = useCallback(
     (row, fallbackSummary = {}) => {
       const summary = Object.keys(fallbackSummary).length
         ? fallbackSummary
         : safeParseJSON(row?.summary, {});
+      const primary = normaliseHexagramRef(summary.primary, row?.hexagram_primary);
+      const resulting = normaliseHexagramRef(
+        summary.resulting,
+        row?.hexagram_resulting
+      );
       return {
         id: row.id,
         createdAt: row.created_at ? new Date(row.created_at) : new Date(),
         note: row.notes ?? "",
         question: row.question ?? "",
-        primary: summary.primary ?? null,
-        resulting: summary.resulting ?? null,
+        primary,
+        resulting,
         primaryLines: Array.isArray(summary.primaryLines)
           ? summary.primaryLines
           : [],
@@ -2215,28 +2099,33 @@ function JournalProvider({ children }) {
         synced: true,
       };
     },
-    []
+    [normaliseHexagramRef]
   );
 
-  const reviveLocalEntry = useCallback((item) => {
-    if (!item) return null;
-    return {
-      id: item.id,
-      createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
-      note: item.note ?? "",
-      question: item.question ?? "",
-      primary: item.primary ?? null,
-      resulting: item.resulting ?? null,
-      primaryLines: Array.isArray(item.primaryLines)
-        ? item.primaryLines
-        : [],
-      resultingLines: Array.isArray(item.resultingLines)
-        ? item.resultingLines
-        : [],
-      aiSummary: item.aiSummary ?? "",
-      synced: Boolean(item.synced),
-    };
-  }, []);
+  const reviveLocalEntry = useCallback(
+    (item) => {
+      if (!item) return null;
+      const primary = normaliseHexagramRef(item.primary, item?.primary?.number);
+      const resulting = normaliseHexagramRef(item.resulting, item?.resulting?.number);
+      return {
+        id: item.id,
+        createdAt: item.createdAt ? new Date(item.createdAt) : new Date(),
+        note: item.note ?? "",
+        question: item.question ?? "",
+        primary,
+        resulting,
+        primaryLines: Array.isArray(item.primaryLines)
+          ? item.primaryLines
+          : [],
+        resultingLines: Array.isArray(item.resultingLines)
+          ? item.resultingLines
+          : [],
+        aiSummary: item.aiSummary ?? "",
+        synced: Boolean(item.synced),
+      };
+    },
+    [normaliseHexagramRef]
+  );
 
   const persistLocalEntries = useCallback(
     async (list) => {
@@ -3016,6 +2905,24 @@ const sanitizeImageUri = (value) => {
   return trimmed.replace(/^http:\/\//i, "https://");
 };
 
+const parseHexNumber = (value) => {
+  if (value == null) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
+const normaliseHexKey = (value) => {
+  const parsed = parseHexNumber(value);
+  if (parsed != null) {
+    return String(parsed);
+  }
+  if (value == null) {
+    return null;
+  }
+  const text = String(value).trim();
+  return text || null;
+};
+
 const hexImageCache = {
   map: new Map(),
   promise: null,
@@ -3030,15 +2937,16 @@ function HexagonThumbnail({ uri, hexNumber = null, size = 52 }) {
   const clipId = clipIdRef.current;
 
   const [resolvedUri, setResolvedUri] = useState(() => sanitizeImageUri(uri));
+  const hexKey = useMemo(() => normaliseHexKey(hexNumber), [hexNumber]);
 
   useEffect(() => {
     setResolvedUri(sanitizeImageUri(uri));
   }, [uri]);
 
   useEffect(() => {
-    if (resolvedUri || !hexNumber) return;
-    if (hexImageCache.map.has(hexNumber)) {
-      const cached = hexImageCache.map.get(hexNumber);
+    if (resolvedUri || !hexKey) return;
+    if (hexImageCache.map.has(hexKey)) {
+      const cached = hexImageCache.map.get(hexKey);
       if (cached) {
         setResolvedUri(cached);
       }
@@ -3053,7 +2961,9 @@ function HexagonThumbnail({ uri, hexNumber = null, size = 52 }) {
           (rows || []).forEach((hex) => {
             if (hex?.number == null) return;
             const cleaned = sanitizeImageUri(hex.imageUrl);
-            hexImageCache.map.set(hex.number, cleaned || null);
+            const key = normaliseHexKey(hex.number);
+            if (!key) return;
+            hexImageCache.map.set(key, cleaned || null);
           });
         })
         .catch((error) =>
@@ -3064,7 +2974,7 @@ function HexagonThumbnail({ uri, hexNumber = null, size = 52 }) {
     hexImageCache.promise
       .then(() => {
         if (!isMounted) return;
-        const cached = hexImageCache.map.get(hexNumber);
+        const cached = hexImageCache.map.get(hexKey);
         if (cached) {
           setResolvedUri(cached);
         }
@@ -3076,7 +2986,7 @@ function HexagonThumbnail({ uri, hexNumber = null, size = 52 }) {
     return () => {
       isMounted = false;
     };
-  }, [resolvedUri, hexNumber]);
+  }, [resolvedUri, hexKey]);
 
   const imageSource = resolvedUri;
   return (
