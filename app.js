@@ -3009,11 +3009,76 @@ function AnimatedLine({ v, moving, delay = 0 }) {
 // 🔶 Hexagon thumb
 const HEX_POINTS = "50,5 93,28 93,72 50,95 7,72 7,28";
 
-function HexagonThumbnail({ uri, size = 52 }) {
-  const imageSource =
-    typeof uri === "string" && uri.trim().length
-      ? uri.trim().replace(/^http:\/\//i, "https://")
-      : "";
+const sanitizeImageUri = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/^http:\/\//i, "https://");
+};
+
+const hexImageCache = {
+  map: new Map(),
+  promise: null,
+};
+
+function HexagonThumbnail({ uri, hexNumber = null, size = 52 }) {
+  const clipIdRef = useRef(null);
+  if (!clipIdRef.current) {
+    HexagonThumbnail._id = (HexagonThumbnail._id || 0) + 1;
+    clipIdRef.current = `hex-clip-${HexagonThumbnail._id}`;
+  }
+  const clipId = clipIdRef.current;
+
+  const [resolvedUri, setResolvedUri] = useState(() => sanitizeImageUri(uri));
+
+  useEffect(() => {
+    setResolvedUri(sanitizeImageUri(uri));
+  }, [uri]);
+
+  useEffect(() => {
+    if (resolvedUri || !hexNumber) return;
+    if (hexImageCache.map.has(hexNumber)) {
+      const cached = hexImageCache.map.get(hexNumber);
+      if (cached) {
+        setResolvedUri(cached);
+      }
+      return;
+    }
+
+    let isMounted = true;
+
+    if (!hexImageCache.promise) {
+      hexImageCache.promise = loadHexagrams()
+        .then((rows) => {
+          (rows || []).forEach((hex) => {
+            if (hex?.number == null) return;
+            const cleaned = sanitizeImageUri(hex.imageUrl);
+            hexImageCache.map.set(hex.number, cleaned || null);
+          });
+        })
+        .catch((error) =>
+          console.log("Hexagram catalog load error:", error?.message || error)
+        );
+    }
+
+    hexImageCache.promise
+      .then(() => {
+        if (!isMounted) return;
+        const cached = hexImageCache.map.get(hexNumber);
+        if (cached) {
+          setResolvedUri(cached);
+        }
+      })
+      .catch((error) =>
+        console.log("Hexagram cache resolve error:", error?.message || error)
+      );
+
+    return () => {
+      isMounted = false;
+    };
+  }, [resolvedUri, hexNumber]);
+
+  const imageSource = resolvedUri;
   return (
     <View
       style={{
@@ -3029,7 +3094,7 @@ function HexagonThumbnail({ uri, size = 52 }) {
     >
       <Svg width="100%" height="100%" viewBox="0 0 100 100">
         <Defs>
-          <ClipPath id="hex-clip">
+          <ClipPath id={clipId}>
             <Polygon points={HEX_POINTS} />
           </ClipPath>
           <SvgLinearGradient id="hex-placeholder" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -3045,10 +3110,14 @@ function HexagonThumbnail({ uri, size = 52 }) {
             preserveAspectRatio="xMidYMid slice"
             href={{ uri: imageSource }}
             xlinkHref={imageSource}
-            clipPath="url(#hex-clip)"
+            clipPath={`url(#${clipId})`}
           />
         ) : (
-          <Path d="M0 0h100v100H0z" fill="url(#hex-placeholder)" clipPath="url(#hex-clip)" />
+          <Path
+            d="M0 0h100v100H0z"
+            fill="url(#hex-placeholder)"
+            clipPath={`url(#${clipId})`}
+          />
         )}
         <Polygon points={HEX_POINTS} fill="transparent" stroke={palette.gold} strokeWidth={3} />
       </Svg>
@@ -4587,7 +4656,7 @@ function JournalListScreen({ navigation, route }) {
           pressed && { opacity: 0.92 },
         ]}
       >
-        <HexagonThumbnail uri={item.primary?.imageUrl} />
+        <HexagonThumbnail uri={item.primary?.imageUrl} hexNumber={item.primary?.number} />
         <View style={stylesJournal.rowContent}>
           <Text style={stylesJournal.rowTitle} numberOfLines={2}>
             {questionText}
@@ -5000,7 +5069,11 @@ function JournalDetailScreen({ route, navigation }) {
 
           <View style={stylesDetail.hexList}>
             <View style={stylesDetail.hexRow}>
-              <HexagonThumbnail uri={entry.primary?.imageUrl} size={60} />
+              <HexagonThumbnail
+                uri={entry.primary?.imageUrl}
+                hexNumber={entry.primary?.number}
+                size={60}
+              />
               <View style={stylesDetail.hexContent}>
                 <Text style={stylesDetail.hexTitle}>{entry.primary?.name || "Primary"}</Text>
                 <Text style={stylesDetail.hexSubtitle}>
@@ -5015,7 +5088,11 @@ function JournalDetailScreen({ route, navigation }) {
               </Text>
             </View>
             <View style={stylesDetail.hexRow}>
-              <HexagonThumbnail uri={entry.resulting?.imageUrl} size={60} />
+              <HexagonThumbnail
+                uri={entry.resulting?.imageUrl}
+                hexNumber={entry.resulting?.number}
+                size={60}
+              />
               <View style={stylesDetail.hexContent}>
                 <Text style={stylesDetail.hexTitle}>{entry.resulting?.name || "Resulting"}</Text>
                 <Text style={stylesDetail.hexSubtitle}>
