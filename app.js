@@ -28,6 +28,7 @@ import {
   Share,
   Dimensions,
 } from "react-native";
+import { Dimensions } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   DefaultTheme,
