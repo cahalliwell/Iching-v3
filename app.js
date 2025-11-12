@@ -184,6 +184,8 @@ const theme = {
   space: (n) => 8 * n,
 };
 
+const screenWidth = Dimensions.get("window").width;
+
 const fonts = {
   title: "Marcellus_400Regular",
   body: "Lora_400Regular",
