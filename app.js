@@ -7,6 +7,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+import "react-native-url-polyfill/auto";
+import "react-native-get-random-values";
 import {
   ActivityIndicator,
   Alert,
@@ -622,14 +624,33 @@ function useRevenueCatController(appUserID, authReady) {
 
 
 // 🔗 Supabase client
-export const SUPABASE_URL = "https://cvowwctcpepbctokktpn.supabase.co";
-export const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2b3d3Y3RjcGVwYmN0b2trdHBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA3MTYyMjIsImV4cCI6MjA3NjI5MjIyMn0.eOJ1Y7c5aBtf64sEXnO1G7z3YQAOhJNUqPfuLcjdNFw";
+const resolveSupabaseSetting = (candidates = [], fallback = "") => {
+  for (const key of candidates) {
+    const value = readEnv(key);
+    if (value) {
+      return value;
+    }
+  }
+  return fallback;
+};
+
+export const SUPABASE_URL = resolveSupabaseSetting(
+  ["EXPO_PUBLIC_SUPABASE_URL", "SUPABASE_URL", "PUBLIC_SUPABASE_URL"],
+  "https://cvowwctcpepbctokktpn.supabase.co"
+);
+
+export const SUPABASE_ANON_KEY = resolveSupabaseSetting(
+  ["EXPO_PUBLIC_SUPABASE_ANON_KEY", "SUPABASE_ANON_KEY", "PUBLIC_SUPABASE_ANON_KEY"],
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN2b3d3Y3RjcGVwYmN0b2trdHBuIiwicm9sZSI6ImFub24iLCJpYXQi" +
+    "OjE3NjA3MTYyMjIsImV4cCI6MjA3NjI5MjIyMn0.eOJ1Y7c5aBtf64sEXnO1G7z3YQAOhJNUqPfuLcjdNFw"
+);
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
+    storage: AsyncStorage,
+    detectSessionInUrl: false,
   },
 });
 
