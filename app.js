@@ -634,8 +634,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 // 📜 Hexagram data helpers
-const SHEET_URL =
-  "https://opensheet.elk.sh/1IYLzxYHomdVern98otj9Ff4C31qiJwK2S65tHMIJIC0/Sheet1";
+const HEXAGRAM_TABLE = "Hexagrams";
 
 const clean = (value) => (value == null ? "" : String(value).trim());
 
@@ -686,12 +685,11 @@ export const normalizeHexagramRow = (row) => {
 
 export async function loadHexagrams() {
   try {
-    const response = await fetch(SHEET_URL);
-    if (!response.ok) {
-      throw new Error(`Sheet request failed: ${response.status}`);
+    const { data, error } = await supabase.from(HEXAGRAM_TABLE).select("*");
+    if (error) {
+      throw error;
     }
-    const json = await response.json();
-    return (json || [])
+    return (data || [])
       .map(normalizeHexagramRow)
       .filter((item) => item.name)
       .sort((a, b) => {
@@ -700,7 +698,7 @@ export async function loadHexagrams() {
         return aNum - bNum;
       });
   } catch (error) {
-    console.log("Error loading sheet:", error?.message || error);
+    console.log("Error loading hexagrams:", error?.message || error);
     return [];
   }
 }
