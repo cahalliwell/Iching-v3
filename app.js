@@ -641,43 +641,64 @@ const clean = (value) => (value == null ? "" : String(value).trim());
 export const normalizeHexagramRow = (row) => {
   const map = {};
   Object.keys(row || {}).forEach((key) => {
-    const normalized = String(key)
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_|_$/g, "");
-    map[normalized] = row[key];
+    const normalized = normalizeKey(key);
+    if (!normalized) return;
+    const value = row[key];
+    map[normalized] = value;
+    const condensed = normalized.replace(/_/g, "");
+    if (condensed && map[condensed] == null) {
+      map[condensed] = value;
+    }
   });
-  const changingLines = [
-    map.cl1 || map.cl_1 || map["changing_line_1"] || "",
-    map.cl2 || map.cl_2 || map["changing_line_2"] || "",
-    map.cl3 || map.cl_3 || map["changing_line_3"] || "",
-    map.cl4 || map.cl_4 || map["changing_line_4"] || "",
-    map.cl5 || map.cl_5 || map["changing_line_5"] || "",
-    map.cl6 || map.cl_6 || map["changing_line_6"] || "",
-  ].map(clean);
+
+  const numberValue = pickField(map, "number", "no", "hexagram", "hexagram_number", "id");
+  const changingLines = Array.from({ length: 6 }).map((_, idx) =>
+    clean(
+      pickField(
+        map,
+        `cl${idx + 1}`,
+        `cl_${idx + 1}`,
+        `changing_line_${idx + 1}`,
+        `changingline${idx + 1}`,
+        `changing_line${idx + 1}`
+      )
+    )
+  );
+
+  const lineSymbols = pickField(map, "lines", "line_symbols", "binary", "lines_binary");
 
   return {
-    number: parseInt(map.number || map.no || map.hexagram || "0", 10) || null,
-    name: clean(map.name || map.title),
-    nature: clean(map.nature || map.trigrams || map.image),
-    essence: clean(map.essence || map.judgment || map.judgement || map.meaning),
-    description: clean(
-      map.description ||
-        map.summary ||
-        map.overview ||
-        map.image_text ||
-        map["image:_text"] ||
-        map.imagetext
+    number: numberValue ? parseInt(numberValue, 10) || null : null,
+    name: clean(pickField(map, "name", "title", "hexagram_name", "primary_name", "label")),
+    nature: clean(pickField(map, "nature", "trigrams", "image", "quality", "character")),
+    essence: clean(
+      pickField(map, "essence", "judgment", "judgement", "meaning", "summary", "overview")
     ),
-    imageUrl: clean(map.image || map.image_url || map["image url"]) || null,
-    linesBinary: (map.lines || "")
+    description: clean(
+      pickField(
+        map,
+        "description",
+        "summary",
+        "overview",
+        "image_text",
+        "image:_text",
+        "imagetext",
+        "details",
+        "body"
+      )
+    ),
+    imageUrl:
+      clean(pickField(map, "image", "image_url", "image link", "imageurl", "artwork")) || null,
+    linesBinary: (lineSymbols || "")
       .replace(/⚊/g, "1")
       .replace(/⚋/g, "0")
       .trim(),
     changingLines,
-    judgment: clean(map.judgment || map.judgement || map.meaning || map.essence),
+    judgment: clean(
+      pickField(map, "judgment", "judgement", "meaning", "essence", "interpretation")
+    ),
     imageText: clean(
-      map.image_text || map["image:_text"] || map.imagetext || map.description
+      pickField(map, "image_text", "image:_text", "imagetext", "description", "image meaning")
     ),
     _raw: row,
   };
