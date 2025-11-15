@@ -28,6 +28,7 @@ import {
   Share,
   Dimensions,
 } from "react-native";
+import { Dimensions } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   DefaultTheme,
@@ -61,7 +62,7 @@ import Svg, {
   Text as SvgText,
   Circle as SvgCircle,
 } from "react-native-svg";
-import { BarChart, LineChart, PieChart } from "react-native-chart-kit";
+import { BarChart } from "react-native-chart-kit";
 import { createClient } from "@supabase/supabase-js";
 
 let Purchases = null;
@@ -190,22 +191,6 @@ const fonts = {
   body: "Lora_400Regular",
   bodyBold: "Lora_600SemiBold",
 };
-
-// Some legacy call sites still expect a globally available Circle element from
-// react-native-svg. Expo Snack caches aggressively, so we expose the alias to
-// avoid ReferenceError crashes when the bundle hasn't refreshed fully.
-const ensureLegacyCircle = (maybeCircle) => {
-  const fallback = maybeCircle || ((props) => null);
-  const target = globalRef || null;
-
-  if (target && !target.Circle) {
-    target.Circle = fallback;
-  }
-
-  return fallback;
-};
-
-ensureLegacyCircle(SvgCircle);
 
 const screenTopPadding = Platform.select({
   ios: theme.space(1.5),
@@ -650,31 +635,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 // 📜 Hexagram data helpers
 const HEXAGRAM_TABLE = "Hexagrams";
-
-const normalizeKey = (key) =>
-  String(key || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_|_$/g, "");
-
-const pickField = (map, ...candidates) => {
-  for (const candidate of candidates) {
-    const normalized = normalizeKey(candidate);
-    if (!normalized) continue;
-    const variations = [normalized];
-    const condensed = normalized.replace(/_/g, "");
-    if (condensed && condensed !== normalized) {
-      variations.push(condensed);
-    }
-    for (const key of variations) {
-      const value = map[key];
-      if (value != null && String(value).trim() !== "") {
-        return value;
-      }
-    }
-  }
-  return "";
-};
 
 const clean = (value) => (value == null ? "" : String(value).trim());
 
@@ -1317,12 +1277,11 @@ function HexagonLabel({ cx, cy, value, size = "small", fill = palette.white, str
 
 function useInsightsChartDimensions(styleRef, minWidth = 200) {
   const { width: windowWidth } = useWindowDimensions();
-  const measuredWidth = windowWidth || screenWidth;
+  const baseWidth = Dimensions.get("window").width;
+  const measuredWidth = windowWidth || baseWidth;
   const horizontalPadding = theme.space(3) * 2 + theme.space(2) * 2;
   const rawWidth = Math.max(0, measuredWidth - horizontalPadding);
-  const fallbackWidth = Math.max(0, screenWidth - theme.space(2));
-  const availableWidth = rawWidth || fallbackWidth;
-  const chartWidth = Math.max(minWidth, Math.min(availableWidth, fallbackWidth || availableWidth));
+  const chartWidth = Math.max(minWidth, rawWidth);
   const flattenedStyle = StyleSheet.flatten(styleRef) || {};
   const chartHeight = flattenedStyle.height || flattenedStyle.minHeight || 180;
   return { chartWidth, chartHeight };
@@ -1334,7 +1293,6 @@ function WeeklyChart({ data, loading }) {
   const progress = useChartProgress([JSON.stringify(chartData)], loading || !hasData);
   const animatedValues = chartData.map((item) => (hasData ? item.readings * progress : 0));
   const { chartWidth, chartHeight } = useInsightsChartDimensions(stylesInsights.barChart);
-  const limitedWidth = Math.max(0, Math.min(chartWidth, screenWidth - theme.space(2)));
 
   const chartConfig = useMemo(
     () => ({
@@ -1386,7 +1344,7 @@ function WeeklyChart({ data, loading }) {
     <BarChart
       style={stylesInsights.barChart}
       data={chartKitData}
-      width={limitedWidth}
+      width={chartWidth}
       height={chartHeight}
       chartConfig={chartConfig}
       fromZero
@@ -1426,7 +1384,6 @@ function MonthlyChart({ data, loading }) {
     stylesInsights.barChartTall,
     220
   );
-  const limitedWidth = Math.max(0, Math.min(chartWidth, screenWidth - theme.space(2)));
 
   const chartConfig = useMemo(
     () => ({
@@ -1475,47 +1432,38 @@ function MonthlyChart({ data, loading }) {
   };
 
   return (
-    <View style={stylesInsights.chartWrapper}>
-      <BarChart
-        style={stylesInsights.barChartTall}
-        data={chartKitData}
-        width={limitedWidth}
-        height={chartHeight}
-        chartConfig={chartConfig}
-        fromZero
-        withHorizontalLabels={false}
-        withVerticalLabels={false}
-        withInnerLines
-        withHorizontalLines
-        withVerticalLines={false}
-        segments={5}
-        showBarTops={false}
-        showValuesOnTopOfBars={false}
-        yAxisSuffix=""
-        barRadius={12}
-        flatColor
-        renderCustomBarContent={({ index, value, x, y, width: barWidth }) => {
-          if (!chartData[index] || value <= 0) return null;
-          const cy = Math.max(y - 18, 18);
-          return (
-            <HexagonLabel
-              key={`${chartData[index]?.month || "month"}-${index}`}
-              cx={x + barWidth / 2}
-              cy={cy}
-              value={Math.round(chartData[index].readings)}
-              size="small"
-            />
-          );
-        }}
-      />
-      <View style={[stylesInsights.chartXAxisLabels, { width: limitedWidth }]}>
-        {chartData.map((item, index) => (
-          <View key={`${item?.month || "month"}-label-${index}`} style={stylesInsights.chartXAxisLabelCell}>
-            <Text style={stylesInsights.chartXAxisLabelText}>{item?.month || ""}</Text>
-          </View>
-        ))}
-      </View>
-    </View>
+    <BarChart
+      style={stylesInsights.barChartTall}
+      data={chartKitData}
+      width={chartWidth}
+      height={chartHeight}
+      chartConfig={chartConfig}
+      fromZero
+      withHorizontalLabels={false}
+      withVerticalLabels
+      withInnerLines
+      withHorizontalLines
+      withVerticalLines={false}
+      segments={5}
+      showBarTops={false}
+      showValuesOnTopOfBars={false}
+      yAxisSuffix=""
+      barRadius={12}
+      flatColor
+      renderCustomBarContent={({ index, value, x, y, width: barWidth }) => {
+        if (!chartData[index] || value <= 0) return null;
+        const cy = Math.max(y - 18, 18);
+        return (
+          <HexagonLabel
+            key={`${chartData[index]?.month || "month"}-${index}`}
+            cx={x + barWidth / 2}
+            cy={cy}
+            value={Math.round(chartData[index].readings)}
+            size="small"
+          />
+        );
+      }}
+    />
   );
 }
 
@@ -1546,7 +1494,6 @@ function TopCastsChart({ data, loading }) {
     hasData ? (item.total_casts || 0) * progress : 0
   );
   const { chartWidth, chartHeight } = useInsightsChartDimensions(stylesInsights.barChart);
-  const limitedWidth = Math.max(0, Math.min(chartWidth, screenWidth - theme.space(2)));
 
   const chartConfig = useMemo(
     () => ({
@@ -1601,7 +1548,7 @@ function TopCastsChart({ data, loading }) {
     <BarChart
       style={stylesInsights.barChart}
       data={chartKitData}
-      width={limitedWidth}
+      width={chartWidth}
       height={chartHeight}
       chartConfig={chartConfig}
       fromZero
@@ -2079,30 +2026,11 @@ const stylesInsights = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
   },
-  chartWrapper: {
-    alignItems: "center",
-  },
   barChart: {
     height: 180,
   },
   barChartTall: {
     height: 220,
-  },
-  chartXAxisLabels: {
-    flexDirection: "row",
-    alignSelf: "stretch",
-    justifyContent: "space-between",
-    marginTop: theme.space(1),
-    paddingHorizontal: theme.space(0.5),
-  },
-  chartXAxisLabelCell: {
-    flex: 1,
-    alignItems: "center",
-  },
-  chartXAxisLabelText: {
-    fontFamily: fonts.body,
-    fontSize: 12,
-    color: palette.inkMuted,
   },
   chartPlaceholder: {
     borderRadius: theme.radius,
@@ -3492,118 +3420,115 @@ const stylesReading = StyleSheet.create({
 
 // ✨ Hero hexagon
 function GlowingHexagon() {
-  const pulse = useRef(new Animated.Value(0)).current;
+  const glowOpacity = useRef(new Animated.Value(0.7)).current;
+  const glowScale = useRef(new Animated.Value(0.92)).current;
 
   useEffect(() => {
-    const loop = Animated.loop(
+    const auraAnimation = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 2600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 0,
-          duration: 2600,
-          useNativeDriver: true,
-        }),
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 0.95,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowScale, {
+            toValue: 1.05,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(glowOpacity, {
+            toValue: 0.6,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowScale, {
+            toValue: 0.92,
+            duration: 3200,
+            useNativeDriver: true,
+          }),
+        ]),
       ])
     );
-    loop.start();
-    return () => loop.stop();
-  }, [pulse]);
-
-  const glowScale = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.94, 1.04],
-  });
-  const glowOpacity = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.55, 0.92],
-  });
-  const coreOpacity = pulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.95, 1],
-  });
+    auraAnimation.start();
+    return () => auraAnimation.stop();
+  }, [glowOpacity, glowScale]);
 
   return (
-    <View
-      style={{
-        alignItems: "center",
-        justifyContent: "center",
-        marginVertical: theme.space(3),
-      }}
-    >
+    <View style={{ alignItems: "center", marginVertical: theme.space(3) }}>
       <Animated.View
-        pointerEvents="none"
         style={{
           position: "absolute",
-          width: 220,
-          height: 220,
-          borderRadius: 110,
-          overflow: "hidden",
           opacity: glowOpacity,
           transform: [{ scale: glowScale }],
-          shadowColor: "#f5d67a",
-          shadowOpacity: 0.45,
-          shadowRadius: 34,
-          shadowOffset: { width: 0, height: 6 },
-          elevation: 24,
         }}
       >
-        <LinearGradient
-          colors={["rgba(255, 225, 150, 0.85)", "rgba(255, 190, 86, 0.05)"]}
-          start={{ x: 0.3, y: 0 }}
-          end={{ x: 0.8, y: 1 }}
-          style={{ flex: 1 }}
-        />
-      </Animated.View>
-      <Animated.View
-        style={{
-          opacity: coreOpacity,
-          transform: [{ scale: glowScale }],
-          shadowColor: "#b5771c",
-          shadowOpacity: 0.3,
-          shadowRadius: 22,
-          shadowOffset: { width: 0, height: 14 },
-          elevation: 16,
-        }}
-      >
-        <Svg width={172} height={172} viewBox="0 0 100 100">
+        <Svg width={240} height={240} viewBox="0 0 200 200">
           <Defs>
-            <SvgLinearGradient id="hex-core" x1="50%" y1="0%" x2="50%" y2="100%">
-              <Stop offset="0%" stopColor="#fff5c4" stopOpacity="1" />
-              <Stop offset="40%" stopColor="#ffd770" stopOpacity="0.95" />
-              <Stop offset="100%" stopColor="#f3a42e" stopOpacity="1" />
-            </SvgLinearGradient>
-            <SvgLinearGradient id="hex-flare" x1="0%" y1="0%" x2="100%" y2="100%">
-              <Stop offset="0%" stopColor="rgba(255, 255, 255, 0.8)" />
-              <Stop offset="55%" stopColor="rgba(255, 255, 255, 0.2)" />
-              <Stop offset="100%" stopColor="rgba(255, 180, 70, 0.05)" />
-            </SvgLinearGradient>
-            <RadialGradient id="hex-inner" cx="50%" cy="45%" r="60%">
-              <Stop offset="0%" stopColor="rgba(255, 255, 255, 0.92)" />
-              <Stop offset="65%" stopColor="rgba(255, 211, 102, 0.35)" />
-              <Stop offset="100%" stopColor="rgba(255, 191, 70, 0)" />
+            <RadialGradient id="aura" cx="50%" cy="50%" r="50%">
+              <Stop offset="0%" stopColor="#fff9e8" stopOpacity="1" />
+              <Stop offset="45%" stopColor={palette.goldLight} stopOpacity="0.85" />
+              <Stop offset="100%" stopColor={palette.parchmentGold} stopOpacity="0" />
             </RadialGradient>
+            <RadialGradient id="innerGlow" cx="50%" cy="50%" r="60%">
+              <Stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+              <Stop offset="70%" stopColor="#ffcf70" stopOpacity="0" />
+            </RadialGradient>
+            <SvgLinearGradient id="edgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#fff4c9" stopOpacity="0.8" />
+              <Stop offset="55%" stopColor="rgba(255, 244, 201, 0)" stopOpacity="0" />
+              <Stop offset="100%" stopColor="#d68a1f" stopOpacity="0.6" />
+            </SvgLinearGradient>
           </Defs>
-          <Polygon points={HEX_POINTS} fill="url(#hex-core)" />
-          <Polygon points={HEX_POINTS} fill="url(#hex-inner)" />
-          <Polygon points={HEX_POINTS} fill="url(#hex-flare)" opacity="0.55" />
+          <Circle cx="100" cy="100" r="92" fill="url(#aura)" />
+        </Svg>
+      </Animated.View>
+
+      <View
+        style={{
+          width: 190,
+          height: 190,
+          borderRadius: 95,
+          alignItems: "center",
+          justifyContent: "center",
+          shadowColor: palette.gold,
+          shadowOpacity: 0.35,
+          shadowRadius: 26,
+          shadowOffset: { width: 0, height: 18 },
+          elevation: 16,
+          backgroundColor: "rgba(255, 241, 205, 0.28)",
+        }}
+      >
+        <Svg width={170} height={170} viewBox="0 0 100 100">
+          <Defs>
+            <RadialGradient id="core" cx="50%" cy="50%" r="55%">
+              <Stop offset="0%" stopColor="#fffbe8" stopOpacity="1" />
+              <Stop offset="38%" stopColor="#ffe7a6" stopOpacity="0.98" />
+              <Stop offset="100%" stopColor="#f3b43c" stopOpacity="1" />
+            </RadialGradient>
+            <RadialGradient id="innerGlow" cx="50%" cy="50%" r="60%">
+              <Stop offset="0%" stopColor="#ffffff" stopOpacity="0.9" />
+              <Stop offset="70%" stopColor="#ffcf70" stopOpacity="0" />
+            </RadialGradient>
+            <SvgLinearGradient id="edgeSheen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#fff4c9" stopOpacity="0.8" />
+              <Stop offset="55%" stopColor="rgba(255, 244, 201, 0)" stopOpacity="0" />
+              <Stop offset="100%" stopColor="#d68a1f" stopOpacity="0.6" />
+            </SvgLinearGradient>
+          </Defs>
+          <Polygon points={HEX_POINTS} fill="url(#core)" />
+          <Polygon points={HEX_POINTS} fill="url(#edgeSheen)" opacity="0.5" />
+          <Polygon points={HEX_POINTS} fill="url(#innerGlow)" opacity="0.7" />
           <Polygon
             points={HEX_POINTS}
-            stroke="rgba(255, 239, 190, 0.8)"
-            strokeWidth={1.2}
-            fill="none"
-          />
-          <Polygon
-            points={HEX_POINTS}
-            stroke="rgba(243, 164, 46, 0.45)"
-            strokeWidth={2.1}
+            stroke="rgba(255, 255, 255, 0.65)"
+            strokeWidth={0.9}
             fill="none"
           />
         </Svg>
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -3793,7 +3718,11 @@ const stylesHome = StyleSheet.create({
   },
   headerRow: {
     alignItems: "flex-end",
-    paddingTop: screenTopPadding,
+    paddingTop: Platform.select({
+      ios: theme.space(1.5),
+      android: theme.space(2),
+      default: theme.space(1.5),
+    }),
   },
   mainContent: {
     flexGrow: 1,
